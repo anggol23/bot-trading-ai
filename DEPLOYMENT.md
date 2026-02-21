@@ -83,7 +83,7 @@ Bergeser ke folder backend, lalu luncurkan melalui Uvicorn menggunakan _interpre
 
 ```bash
 cd /root/ai-trading/web/server
-pm2 start uvicorn --name "ai-trading-api" --interpreter ../../venv/bin/python -- main:app --host 127.0.0.1 --port 8000
+pm2 start ../../venv/bin/python --name "ai-trading-api" -- -m uvicorn main:app --host 127.0.0.1 --port 8000
 ```
 
 ### 3.4. Simpan Konfigurasi dan Setup Auto-Start

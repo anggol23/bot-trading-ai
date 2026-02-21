@@ -57,8 +57,8 @@ def get_portfolio_summary() -> PortfolioSummaryResponse:
         )
     else:
         return PortfolioSummaryResponse(
-            total_equity=10000000,
-            available_balance=10000000,
+            total_equity=300000.0,
+            available_balance=300000.0,
             unrealized_pnl=0,
             realized_pnl_today=realized_pnl,
             open_positions=len(open_positions),

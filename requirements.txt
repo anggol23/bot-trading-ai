@@ -9,6 +9,8 @@ ta==0.11.0
 
 # HTTP & API
 requests==2.32.3
+fastapi>=0.111.0
+uvicorn>=0.30.1
 
 # Configuration
 python-dotenv==1.0.1

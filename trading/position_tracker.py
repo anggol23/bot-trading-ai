@@ -191,11 +191,14 @@ class PositionTracker:
 
         # Equity calculation
         if equity is None:
-            try:
-                balance = self.market.fetch_balance()
-                equity = balance.get("total", {}).get("IDR", 10_000_000)
-            except Exception:
-                equity = 10_000_000  # Default paper balance
+            if self.config.trading.mode == "paper":
+                equity = 300_000
+            else:
+                try:
+                    balance = self.market.fetch_balance()
+                    equity = balance.get("total", {}).get("IDR", 0)
+                except Exception:
+                    equity = 0
 
         if self._initial_equity is None:
             self._initial_equity = equity
