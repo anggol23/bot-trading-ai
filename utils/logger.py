@@ -42,8 +42,9 @@ def setup_logging(level: str = "INFO", log_dir: str = "logs"):
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
-    # Console handler
+    # Console handler (Only ERROR and above)
     console = logging.StreamHandler()
+    console.setLevel(logging.ERROR)
     console.setFormatter(fmt)
     root.addHandler(console)
 
