@@ -6,7 +6,7 @@ from tabulate import tabulate
 from colorama import Fore, Style, init as colorama_init
 from typing import Optional
 
-from trading.position_tracker import PortfolioSummary
+from core.entities.portfolio_summary import PortfolioSummary
 from utils.logger import get_logger
 
 logger = get_logger(__name__)

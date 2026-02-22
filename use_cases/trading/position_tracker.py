@@ -5,45 +5,17 @@ Position Tracker - Monitors open positions, updates SL/TP, calculates P&L.
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 
-from config import Config
-from data.database import Database
-from data.market_data import MarketDataFetcher
-from trading.risk_manager import RiskManager
-from trading.executor import OrderExecutor
-from dataclasses import dataclass
+from config.settings import Config
+from core.interfaces.database_port import IDatabase
+from core.interfaces.market_data_port import IMarketData
+from core.interfaces.executor_port import IExecutor
+from use_cases.trading.risk_manager import RiskManager
+from use_cases.analysis.volume_analyzer import VolumeAnalyzer
+from core.entities.position_summary import PositionSummary
+from core.entities.portfolio_summary import PortfolioSummary
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
-
-
-@dataclass
-class PositionSummary:
-    """Summary of a single open position."""
-    trade_id: int
-    symbol: str
-    side: str
-    entry_price: float
-    current_price: float
-    amount: float
-    cost: float
-    stop_loss: float
-    take_profit: float
-    unrealized_pnl: float
-    unrealized_pnl_pct: float
-    mode: str
-
-
-@dataclass
-class PortfolioSummary:
-    """Summary of entire portfolio."""
-    total_equity: float
-    available_balance: float
-    unrealized_pnl: float
-    realized_pnl_today: float
-    open_positions: int
-    positions: List[PositionSummary]
-    daily_drawdown_pct: float
-    daily_drawdown_limit_pct: float
 
 
 class PositionTracker:
@@ -60,19 +32,21 @@ class PositionTracker:
     def __init__(
         self,
         config: Config,
-        db: Database,
-        market_data: MarketDataFetcher,
+        db: IDatabase,
+        market_data: IMarketData,
         risk_manager: RiskManager,
-        executor: OrderExecutor,
+        executor: IExecutor,
+        volume_analyzer: VolumeAnalyzer = None,
     ):
         self.config = config
         self.db = db
         self.market = market_data
         self.risk_mgr = risk_manager
         self.executor = executor
+        self.volume_analyzer = volume_analyzer
         self._initial_equity = None
 
-    def check_positions(self) -> List[str]:
+    async def check_positions(self) -> List[str]:
         """
         Check all open positions for SL/TP hits and trailing stop updates.
         
@@ -88,10 +62,29 @@ class PositionTracker:
         for trade in open_trades:
             try:
                 symbol = trade["symbol"]
+                side = trade["side"]
 
                 # Get current price
-                ticker = self.market.fetch_ticker(symbol)
+                ticker = await self.market.fetch_ticker(symbol)
                 current_price = ticker["last"]
+                
+                # Check Volume Exhaustion Trailing
+                if self.config.risk.enable_volume_exhaustion and self.volume_analyzer:
+                    vol_signal = self.volume_analyzer.analyze(symbol)
+                    
+                    if side == "buy" and vol_signal.net_flow == "DISTRIBUTING" and vol_signal.intensity in ["HIGH", "MEDIUM"]:
+                        close_reason = f"VOLUME EXHAUSTION: Smart Money dumping ({vol_signal.confidence:.0f}% confidence)"
+                        success = await self.executor.close_position(trade, current_price, close_reason)
+                        if success:
+                            actions.append(f"Force Closed {symbol}: {close_reason}")
+                        continue
+                        
+                    elif side == "sell" and vol_signal.net_flow == "ACCUMULATING" and vol_signal.intensity in ["HIGH", "MEDIUM"]:
+                        close_reason = f"VOLUME EXHAUSTION: Smart Money accumulating ({vol_signal.confidence:.0f}% confidence)"
+                        success = await self.executor.close_position(trade, current_price, close_reason)
+                        if success:
+                            actions.append(f"Force Closed {symbol}: {close_reason}")
+                        continue
 
                 # Check if should close (SL or TP hit)
                 close_reason = self.risk_mgr.should_close_position(
@@ -99,7 +92,7 @@ class PositionTracker:
                 )
 
                 if close_reason:
-                    success = self.executor.close_position(
+                    success = await self.executor.close_position(
                         trade, current_price, close_reason
                     )
                     if success:
@@ -111,7 +104,7 @@ class PositionTracker:
                 # Check trailing stop update
                 # Need ATR for trailing calculation
                 try:
-                    df = self.market.fetch_ohlcv(symbol, "1h", limit=50)
+                    df = await self.market.fetch_ohlcv(symbol, "1h", limit=50)
                     if df is not None and len(df) > 14:
                         import ta as ta_lib
                         atr = ta_lib.volatility.AverageTrueRange(
@@ -141,7 +134,7 @@ class PositionTracker:
 
         return actions
 
-    def get_portfolio_summary(self, equity: Optional[float] = None) -> PortfolioSummary:
+    async def get_portfolio_summary(self, equity: Optional[float] = None) -> PortfolioSummary:
         """
         Generate a complete portfolio summary.
         
@@ -154,7 +147,7 @@ class PositionTracker:
 
         for trade in open_trades:
             try:
-                ticker = self.market.fetch_ticker(trade["symbol"])
+                ticker = await self.market.fetch_ticker(trade["symbol"])
                 current_price = ticker["last"]
 
                 if trade["side"] == "buy":
@@ -195,7 +188,7 @@ class PositionTracker:
                 equity = 300_000
             else:
                 try:
-                    balance = self.market.fetch_balance()
+                    balance = await self.market.fetch_balance()
                     equity = balance.get("total", {}).get("IDR", 0)
                 except Exception:
                     equity = 0

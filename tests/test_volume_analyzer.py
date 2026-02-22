@@ -1,7 +1,7 @@
 import pytest
 import time
 from unittest.mock import Mock, patch
-from analysis.volume_analyzer import VolumeAnalyzer
+from use_cases.analysis.volume_analyzer import VolumeAnalyzer
 
 @pytest.fixture
 def mock_db():
@@ -11,6 +11,7 @@ def mock_db():
 def mock_config():
     config = Mock()
     config.volume_anomaly.min_usd_value = 5000
+    config.volume_anomaly.spoofing_blacklist_seconds = 300
     return config
 
 def test_volume_analyzer_neutral_no_data(mock_config, mock_db):
@@ -26,9 +27,9 @@ def test_volume_analyzer_neutral_no_data(mock_config, mock_db):
 
 def test_volume_analyzer_accumulation(mock_config, mock_db):
     mock_db.get_volume_anomalies.return_value = [
-        {"side": "buy", "amount_usd": 15000, "timestamp": int(time.time()*1000)},
-        {"side": "buy", "amount_usd": 20000, "timestamp": int(time.time()*1000)},
-        {"side": "sell", "amount_usd": 5000, "timestamp": int(time.time()*1000)},
+        {"anomaly_type": "trade_spike", "side": "buy", "amount_usd": 15000, "timestamp": int(time.time()*1000)},
+        {"anomaly_type": "trade_spike", "side": "buy", "amount_usd": 20000, "timestamp": int(time.time()*1000)},
+        {"anomaly_type": "trade_spike", "side": "sell", "amount_usd": 5000, "timestamp": int(time.time()*1000)},
     ]
     
     analyzer = VolumeAnalyzer(mock_config, mock_db)
@@ -42,8 +43,8 @@ def test_volume_analyzer_accumulation(mock_config, mock_db):
 
 def test_volume_analyzer_distribution_high_intensity(mock_config, mock_db):
     mock_db.get_volume_anomalies.return_value = [
-        {"side": "sell", "amount_usd": 50000, "timestamp": int(time.time()*1000)},
-        {"side": "sell", "amount_usd": 15000, "timestamp": int(time.time()*1000)},
+        {"anomaly_type": "trade_spike", "side": "sell", "amount_usd": 50000, "timestamp": int(time.time()*1000)},
+        {"anomaly_type": "trade_spike", "side": "sell", "amount_usd": 15000, "timestamp": int(time.time()*1000)},
     ]
     
     analyzer = VolumeAnalyzer(mock_config, mock_db)
@@ -52,3 +53,16 @@ def test_volume_analyzer_distribution_high_intensity(mock_config, mock_db):
     assert signal.net_flow == "DISTRIBUTING"
     assert signal.intensity == "HIGH"
     assert signal.imbalance_score == -1.0
+
+def test_volume_analyzer_spoofing_veto(mock_config, mock_db):
+    now_ms = int(time.time()*1000)
+    mock_db.get_volume_anomalies.return_value = [
+        {"anomaly_type": "trade_spike", "side": "buy", "amount_usd": 50000, "timestamp": now_ms},
+        {"anomaly_type": "spoofing_trap", "side": "buy", "amount_usd": 0, "timestamp": now_ms - 10000},
+    ]
+    
+    analyzer = VolumeAnalyzer(mock_config, mock_db)
+    signal = analyzer.analyze("BTC/IDR")
+    
+    assert signal.net_flow == "NEUTRAL"
+    assert signal.confidence == 0.0

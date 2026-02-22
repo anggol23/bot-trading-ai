@@ -34,6 +34,7 @@ class VolumeAnomalyResponse(BaseModel):
     type: str # 'TRADE_SPIKE' or 'ORDERBOOK_IMBALANCE'
     side: str
     amount_usd: float
+    z_score: float
     imbalance_ratio: float
     timestamp: str
 

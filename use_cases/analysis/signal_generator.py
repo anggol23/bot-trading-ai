@@ -3,48 +3,14 @@ Signal Generator - Combines technical and whale signals into trading decisions.
 Whale confirmation is REQUIRED for entry — technical alone is not enough.
 """
 
-from dataclasses import dataclass
 from typing import Dict, List, Optional, Any
 
-from analysis.technical import TechnicalSignal
-from analysis.volume_analyzer import VolumeSignal
+from core.entities.technical_signal import TechnicalSignal
+from core.entities.volume_signal import VolumeSignal
+from core.entities.trading_signal import TradingSignal
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
-
-
-@dataclass
-class TradingSignal:
-    """Final combined trading signal."""
-    symbol: str
-    action: str              # STRONG_BUY, BUY, HOLD, SELL, STRONG_SELL
-    confidence: float        # 0.0 - 1.0
-    reason: str              # Human-readable explanation
-
-    # Component signals
-    technical: Optional[TechnicalSignal] = None
-    volume: Optional[VolumeSignal] = None
-
-    # Multi-timeframe confirmation
-    timeframes_aligned: int = 0
-    total_timeframes: int = 1
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "symbol": self.symbol,
-            "action": self.action,
-            "confidence": self.confidence,
-            "reason": self.reason,
-            "technical_trend": self.technical.trend if self.technical else None,
-            "technical_momentum": self.technical.momentum if self.technical else None,
-            "technical_confidence": self.technical.confidence if self.technical else None,
-            "volume_flow": self.volume.net_flow if self.volume else None,
-            "volume_intensity": self.volume.intensity if self.volume else None,
-            "volume_confidence": self.volume.confidence if self.volume else None,
-            "combined_action": self.action,
-            "combined_confidence": self.confidence,
-            "timeframes_aligned": self.timeframes_aligned,
-        }
 
 
 class SignalGenerator:
@@ -65,6 +31,7 @@ class SignalGenerator:
         self,
         tech_signal: Optional[TechnicalSignal],
         volume_signal: Optional[VolumeSignal],
+        sentiment_signal: Optional[Dict[str, Any]] = None,
     ) -> TradingSignal:
         """
         Generate a trading signal by combining technical + whale analysis.
@@ -79,6 +46,22 @@ class SignalGenerator:
         symbol = tech_signal.symbol if tech_signal else (
             volume_signal.symbol if volume_signal else "UNKNOWN"
         )
+
+        # ──── VETO: Fundamental News Crash ────
+        if sentiment_signal and sentiment_signal.get("status") == "NEGATIVE":
+            reason = (
+                f"🚨 SENTIMENT VETO: Berita fundamental sangat buruk "
+                f"(Score: {sentiment_signal.get('score'):.2f}) | "
+                f"Mencegah resiko crash, force HOLD."
+            )
+            return TradingSignal(
+                symbol=symbol,
+                action="HOLD",
+                confidence=0.0,
+                reason=reason,
+                technical=tech_signal,
+                volume=volume_signal,
+            )
 
         # ──── Case 1: No data at all ────
         if tech_signal is None and volume_signal is None:
@@ -269,6 +252,7 @@ class SignalGenerator:
         self,
         tech_signals: Dict[str, TechnicalSignal],
         volume_signal: VolumeSignal,
+        sentiment_signal: Optional[Dict[str, Any]] = None,
     ) -> TradingSignal:
         """
         Generate signal using multi-timeframe confirmation.
@@ -285,7 +269,7 @@ class SignalGenerator:
         signals = {}
         for tf, tech in tech_signals.items():
             if tech is not None:
-                signals[tf] = self.generate(tech, volume_signal)
+                signals[tf] = self.generate(tech, volume_signal, sentiment_signal)
 
         if not signals:
             symbol = volume_signal.symbol if volume_signal else "UNKNOWN"

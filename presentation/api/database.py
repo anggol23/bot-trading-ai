@@ -2,7 +2,7 @@ import sqlite3
 import os
 from datetime import datetime
 from typing import List, Dict, Any
-from models import PortfolioSummaryResponse, PositionResponse, SignalResponse, VolumeAnomalyResponse, ChartDataPoint
+from presentation.api.models import PortfolioSummaryResponse, PositionResponse, SignalResponse, VolumeAnomalyResponse, ChartDataPoint
 
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "trading_agent.db")
 
@@ -122,6 +122,7 @@ def get_volume_anomalies(limit: int = 10) -> List[VolumeAnomalyResponse]:
         type=r['anomaly_type'],
         side=r['side'],
         amount_usd=r['amount_usd'],
+        z_score=r.get('z_score', 0.0),
         imbalance_ratio=0.0,
         timestamp=datetime.fromtimestamp(r['timestamp']/1000.0).isoformat()
     ) for r in rows]

@@ -4,35 +4,14 @@ Analyzes volume anomalies (large trades, orderbook walls) to determine
 smart money flow direction (Accumulation or Distribution).
 """
 
-from dataclasses import dataclass
-from typing import List, Dict, Optional
 import time
 
-from config import Config
-from data.database import Database
+from config.settings import Config
+from core.interfaces.database_port import IDatabase
+from core.entities.volume_signal import VolumeSignal
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
-
-
-@dataclass
-class VolumeSignal:
-    """Result of volume anomaly analysis."""
-    symbol: str
-    net_flow: str         # ACCUMULATING, DISTRIBUTING, NEUTRAL
-    intensity: str        # HIGH, MEDIUM, LOW
-    imbalance_score: float # -1.0 to +1.0 (negative = sell bias, positive = buy bias)
-    confidence: float     # 0.0 - 1.0
-
-    def to_dict(self):
-        return {
-            "symbol": self.symbol,
-            "net_flow": self.net_flow,
-            "intensity": self.intensity,
-            "imbalance_score": self.imbalance_score,
-            "confidence": self.confidence,
-        }
-
 
 class VolumeAnalyzer:
     """
@@ -40,7 +19,7 @@ class VolumeAnalyzer:
     to determine the direction of smart money flow.
     """
 
-    def __init__(self, config: Config, db: Database):
+    def __init__(self, config: Config, db: IDatabase):
         self.config = config
         self.db = db
 
@@ -55,9 +34,18 @@ class VolumeAnalyzer:
         if not anomalies:
             return VolumeSignal(symbol, "NEUTRAL", "LOW", 0.0, 0.0)
 
+        # 0. Check for Spoofing Veto
+        spoof_lookback = int(time.time() * 1000) - (self.config.volume_anomaly.spoofing_blacklist_seconds * 1000)
+        recent_spoofs = [a for a in anomalies if a['anomaly_type'] == 'spoofing_trap' and a['timestamp'] >= spoof_lookback]
+        
+        if recent_spoofs:
+            logger.warning(f"🚫 {symbol} is currently under SPOOFING BLACKLIST. Vetoing Volume Signal.")
+            return VolumeSignal(symbol, "NEUTRAL", "LOW", 0.0, 0.0)
+
         # 1. Calculate Imbalance Score based on USD volume
-        buy_usd = sum(e["amount_usd"] for e in anomalies if e["side"] == "buy")
-        sell_usd = sum(e["amount_usd"] for e in anomalies if e["side"] == "sell")
+        valid_anomalies = [a for a in anomalies if a['anomaly_type'] != 'spoofing_trap']
+        buy_usd = sum(e["amount_usd"] for e in valid_anomalies if e["side"] == "buy")
+        sell_usd = sum(e["amount_usd"] for e in valid_anomalies if e["side"] == "sell")
         
         total_usd = buy_usd + sell_usd
         

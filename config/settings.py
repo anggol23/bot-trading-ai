@@ -22,6 +22,9 @@ class VolumeAnomalyConfig:
     multiplier: float = 3.0
     min_usd_value: int = 5_000
     poll_interval_minutes: int = 10
+    z_score_threshold: float = 3.0
+    spoofing_window_seconds: int = 5
+    spoofing_blacklist_seconds: int = 300
 
 
 @dataclass
@@ -31,6 +34,15 @@ class RiskConfig:
     daily_drawdown_limit: float = 0.05    # 5% daily max drawdown
     stop_loss_atr_multiplier: float = 1.5
     take_profit_rr_ratio: float = 2.0     # Risk:Reward = 1:2
+    enable_pyramiding: bool = True
+    pyramid_profit_threshold_pct: float = 5.0
+    enable_volume_exhaustion: bool = True
+    enable_sentiment_veto: bool = True
+
+
+@dataclass
+class NewsConfig:
+    cryptopanic_api_key: str = ""
 
 
 @dataclass
@@ -56,10 +68,17 @@ class Config:
             secret=os.getenv("INDODAX_SECRET", ""),
         )
 
+        self.news = NewsConfig(
+            cryptopanic_api_key=os.getenv("CRYPTOPANIC_API_KEY", ""),
+        )
+
         self.volume_anomaly = VolumeAnomalyConfig(
             multiplier=float(os.getenv("VOLUME_ANOMALY_MULTIPLIER", "3.0")),
             min_usd_value=int(os.getenv("VOLUME_ANOMALY_MIN_USD_VALUE", "5000")),
             poll_interval_minutes=int(os.getenv("VOLUME_POLL_INTERVAL_MINUTES", "10")),
+            z_score_threshold=float(os.getenv("Z_SCORE_THRESHOLD", "3.0")),
+            spoofing_window_seconds=int(os.getenv("SPOOFING_WINDOW_SECONDS", "5")),
+            spoofing_blacklist_seconds=int(os.getenv("SPOOFING_BLACKLIST_SECONDS", "300")),
         )
 
         self.risk = RiskConfig(
@@ -68,6 +87,10 @@ class Config:
             daily_drawdown_limit=float(os.getenv("DAILY_DRAWDOWN_LIMIT", "0.05")),
             stop_loss_atr_multiplier=float(os.getenv("STOP_LOSS_ATR_MULTIPLIER", "1.5")),
             take_profit_rr_ratio=float(os.getenv("TAKE_PROFIT_RR_RATIO", "2.0")),
+            enable_pyramiding=os.getenv("ENABLE_PYRAMIDING", "true").lower() == "true",
+            pyramid_profit_threshold_pct=float(os.getenv("PYRAMID_PROFIT_THRESHOLD_PCT", "5.0")),
+            enable_volume_exhaustion=os.getenv("ENABLE_VOLUME_EXHAUSTION", "true").lower() == "true",
+            enable_sentiment_veto=os.getenv("ENABLE_SENTIMENT_VETO", "true").lower() == "true",
         )
 
         pairs_str = os.getenv("TRADING_PAIRS", "BTC/IDR,ETH/IDR,SOL/IDR")

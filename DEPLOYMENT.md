@@ -2,13 +2,13 @@
 
 Untuk memastikan agen AI beroperasi dan memantau pasar tanpa henti (24 jam) meskipun laptop Anda dimatikan, Anda perlu men-_deploy_ (mengunggah dan menjalankan) sistem ini ke sebuah **VPS (Virtual Private Server)** berbasis Linux.
 
-Sistem kita terdiri dari 3 bagian utama yang harus terus menyala:
+Sistem kita terdiri dari 3 modul terpisah yang harus terus menyala:
 
-1. **AI Trading Engine** (`main.py` - Pengambil keputusan & Eksekutor)
-2. **REST API Backend** (`web/server/main.py` - Penyedia data Dashboard)
-3. **Web Dashboard UI** (`web/client/` - Tampilan visual berbasis React)
+1. **AI Trading Engine** (`presentation/cli/main.py` - AI Core: Pengambil keputusan & Eksekutor)
+2. **REST API Backend** (`presentation/api/main.py` - Penyedia data Dashboard via FastAPI)
+3. **Web Dashboard UI** (`presentation/web/` - Tampilan visual berbasis React/Vite)
 
-Berikut adalah panduan _best practice_ langkah demi langkah untuk melakukan deploy ke server VPS (disarankan menggunakan **Ubuntu 20.04 / 22.04 LTS**).
+Berikut adalah panduan _best practice_ langkah demi langkah untuk melakukan deploy ke server VPS (disarankan menggunakan **Ubuntu 20.04 / 22.04 / 24.04 LTS**).
 
 ---
 
@@ -46,10 +46,11 @@ source venv/bin/activate
 pip install -r requirements.txt
 
 # 2. Jangan lupa buat & isi file .env Anda (Masukkan API Key Indodax)
-nano .env # (Lalu copas isi dari .env lokal Anda, ubah TRADING_MODE=paper jika masih ingin simulasi)
+cp .env.example .env
+nano .env # (Lalu isi Kunci API, dan ubah TRADING_MODE=paper jika ingin simulasi)
 
 # 3. Setup Frontend React
-cd web/client
+cd presentation/web
 npm install
 npm run build
 ```
@@ -58,7 +59,7 @@ npm run build
 
 ## Langkah 3: Menjalankan AI Engine & API Backend via PM2
 
-Karena Anda memfavoritkan `pm2` untuk _process manager_, kita akan menggunakannya untuk menahan agar _bot_ dan API tetap hidup di _background_ dan akan otomatis _restart_ jika _error_ atau server _reboot_.
+Karena menjaga skrip tetap hidup itu rumit, kita akan menggunakan **PM2** (_Process Manager_) untuk menahan agar AI bot dan API tetap hidup di _background_ dan otomatis _restart_ jika _error_ atau VPS nge-_reboot_.
 
 ### 3.1. Install PM2 Global
 
@@ -70,20 +71,22 @@ sudo npm install -g pm2
 
 ### 3.2. Jalankan AI Trading Engine
 
-Pastikan Anda berada di _root_ proyek:
+Kembali ke _root_ proyek, dan berikan Python Path ke PM2 agar sistem mengenali strukturnya:
 
 ```bash
 cd /root/ai-trading
-pm2 start main.py --name "ai-trading-bot" --interpreter ./venv/bin/python
+export PYTHONPATH=$(pwd)
+pm2 start presentation/cli/main.py --name "ai-trading-bot" --interpreter ./venv/bin/python
 ```
 
 ### 3.3. Jalankan FastAPI Backend
 
-Bergeser ke folder backend, lalu luncurkan melalui Uvicorn menggunakan _interpreter_ virtual environment:
+Lalu kita luncurkan API Server di Port 8000:
 
 ```bash
-cd /root/ai-trading/web/server
-pm2 start ../../venv/bin/python --name "ai-trading-api" -- -m uvicorn main:app --host 127.0.0.1 --port 8000
+cd /root/ai-trading
+export PYTHONPATH=$(pwd)
+pm2 start ./venv/bin/uvicorn --name "ai-trading-api" -- presentation.api.main:app --host 127.0.0.1 --port 8000
 ```
 
 ### 3.4. Simpan Konfigurasi dan Setup Auto-Start
@@ -98,12 +101,12 @@ pm2 save
 pm2 startup
 ```
 
-Lalu _copy-paste_ perintah yang dimunculkan oleh layar VPS Anda setelah menjalankan kode di atas.
+Lalu **_copy-paste_** perintah (`sudo env PATH...`) yang dimunculkan oleh layar VPS Anda setelah menjalankan kode di atas.
 
-Untuk mengecek _log_ sistem apabila ada error atau sekadar melihat status _Running_:
+Untuk mengecek apakah AI sedang _Trading_ dan tidak ada _Error_:
 
 ```bash
-pm2 logs
+pm2 logs ai-trading-bot
 pm2 status
 ```
 
@@ -111,7 +114,7 @@ pm2 status
 
 ## Langkah 4: Tampilkan Dashboard React ke Publik menggunakan Nginx
 
-Tadi kita telah menjalankan `npm run build` yang menghasilkan folder statis `/root/ai-trading/web/client/dist`. Kita akan mendistribusikannya menggunakan Nginx agar bisa diakses dari IP atau Domain VPS Anda.
+Tadi kita telah menjalankan `npm run build` yang menghasilkan web statis di `/root/ai-trading/presentation/web/dist`. Kita akan mendistribusikannya menggunakan Nginx agar bisa diakses dari Web Browser HP atau Laptop.
 
 1. Hapus konfigurasi _default_ nginx:
 
@@ -125,21 +128,21 @@ sudo rm /etc/nginx/sites-enabled/default
 sudo nano /etc/nginx/sites-available/aitrading
 ```
 
-Isi dengan:
+Isi dengan script blok server Nginx berikut:
 
 ```nginx
 server {
     listen 80;
-    server_name _; # Bisa diganti domain Anda misal: bot.domain.com
+    server_name _; # Bisa diganti dengan domain bot Anda misal: bot.trading.com
 
-    # Area 1: Frontend React UI
+    # Area 1: Frontend React UI (Hasil Build Vite)
     location / {
-        root /root/ai-trading/web/client/dist;
-        index index.html index.htm;
+        root /root/ai-trading/presentation/web/dist;
+        index index.html;
         try_files $uri $uri/ /index.html;
     }
 
-    # Area 2: Proxy API Request ke FastAPI Backend
+    # Area 2: Reverse Proxy untuk FastAPI Backend
     location /api/ {
         proxy_pass http://127.0.0.1:8000/api/;
         proxy_set_header Host $host;
@@ -154,6 +157,15 @@ server {
 sudo ln -s /etc/nginx/sites-available/aitrading /etc/nginx/sites-enabled/
 sudo systemctl restart nginx
 ```
+
+````
+
+3. Aktifkan koneksi Nginx:
+
+```bash
+sudo ln -s /etc/nginx/sites-available/aitrading /etc/nginx/sites-enabled/
+sudo systemctl restart nginx
+````
 
 ---
 

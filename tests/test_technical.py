@@ -6,7 +6,8 @@ Verifies indicator calculations and signal classification.
 import pytest
 import pandas as pd
 import numpy as np
-from analysis.technical import TechnicalAnalyzer, TechnicalSignal
+from use_cases.analysis.technical import TechnicalAnalyzer
+from core.entities.technical_signal import TechnicalSignal
 
 
 def _make_ohlcv(trend="bullish", length=200):

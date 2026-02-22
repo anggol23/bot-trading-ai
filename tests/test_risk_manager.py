@@ -4,9 +4,9 @@ Verifies position sizing (2% rule), stop loss, and drawdown limits.
 """
 
 import pytest
-from config import Config
-from data.database import Database
-from trading.risk_manager import RiskManager
+from config.settings import Config
+from infrastructure.storage.sqlite_repository import SqliteRepository as Database
+from use_cases.trading.risk_manager import RiskManager
 
 
 class TestRiskManager:

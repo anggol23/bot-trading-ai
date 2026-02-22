@@ -4,9 +4,9 @@ Verifies signal combination logic, anti-retail-panic, and volume confirmation.
 """
 
 import pytest
-from analysis.technical import TechnicalSignal
-from analysis.volume_analyzer import VolumeSignal
-from analysis.signal_generator import SignalGenerator
+from core.entities.technical_signal import TechnicalSignal
+from core.entities.volume_signal import VolumeSignal
+from use_cases.analysis.signal_generator import SignalGenerator
 
 
 def _tech(trend="BULLISH", momentum="STRONG", confidence=0.8, rsi=55.0):

@@ -7,10 +7,11 @@ import sqlite3
 import os
 from datetime import datetime
 from typing import List, Optional, Dict, Any
+from core.interfaces.database_port import IDatabase
 
 
-class Database:
-    """SQLite database for persisting trading data."""
+class SqliteRepository(IDatabase):
+    """SQLite database implementing the IDatabase port."""
 
     def __init__(self, db_path: str = "trading_agent.db"):
         self.db_path = db_path
@@ -49,6 +50,7 @@ class Database:
                 amount REAL NOT NULL,
                 price REAL NOT NULL,
                 amount_usd REAL NOT NULL,
+                z_score REAL NOT NULL,
                 timestamp INTEGER NOT NULL,
                 fetched_at TEXT NOT NULL
             )
@@ -148,12 +150,12 @@ class Database:
         now = datetime.utcnow().isoformat()
         cursor.execute("""
             INSERT INTO volume_anomalies
-            (symbol, anomaly_type, side, amount, price, amount_usd, timestamp, fetched_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            (symbol, anomaly_type, side, amount, price, amount_usd, z_score, timestamp, fetched_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             event["symbol"], event["anomaly_type"], event["side"],
             event["amount"], event["price"], event["amount_usd"], 
-            event["timestamp"], now
+            event.get("z_score", 0.0), event["timestamp"], now
         ))
         self.conn.commit()
 
@@ -189,6 +191,16 @@ class Database:
         ))
         self.conn.commit()
         return cursor.lastrowid
+
+    def get_recent_signals(self, limit: int = 10) -> List[Dict]:
+        """Get the most recent signals."""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT * FROM signals
+            ORDER BY created_at DESC
+            LIMIT ?
+        """, (limit,))
+        return [dict(r) for r in cursor.fetchall()]
 
     # ──────────────────────────────── Trades ────────────────────────────────
 
@@ -267,6 +279,17 @@ class Database:
             snapshot["open_positions"], datetime.utcnow().isoformat()
         ))
         self.conn.commit()
+
+    def get_latest_portfolio_snapshot(self) -> Optional[Dict]:
+        """Get the most recent portfolio snapshot."""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT * FROM portfolio_snapshots
+            ORDER BY snapshot_at DESC
+            LIMIT 1
+        """)
+        row = cursor.fetchone()
+        return dict(row) if row else None
 
     def close(self):
         """Close the database connection."""

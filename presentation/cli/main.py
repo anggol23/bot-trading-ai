@@ -11,21 +11,25 @@ Strategy:
 
 import sys
 import time
+import asyncio
 import signal
 import argparse
-import schedule
 from datetime import datetime
 
-from config import Config
-from data.database import Database
-from data.market_data import MarketDataFetcher
-from data.volume_tracker import VolumeTracker
-from analysis.technical import TechnicalAnalyzer
-from analysis.volume_analyzer import VolumeAnalyzer
-from analysis.signal_generator import SignalGenerator, TradingSignal
-from trading.risk_manager import RiskManager
-from trading.executor import OrderExecutor
-from trading.position_tracker import PositionTracker
+from config.settings import Config
+from infrastructure.storage.sqlite_repository import SqliteRepository as Database
+from infrastructure.exchange.indodax_client import MarketDataFetcher
+from infrastructure.exchange.ccxt_executor import OrderExecutor
+from use_cases.analysis.volume_tracker import VolumeTracker
+from use_cases.analysis.technical import TechnicalAnalyzer
+from use_cases.analysis.volume_analyzer import VolumeAnalyzer
+from use_cases.analysis.signal_generator import SignalGenerator
+from use_cases.analysis.omni_scanner import OmniScanner
+from use_cases.analysis.sentiment_analyzer import SentimentAnalyzer
+from core.entities.trading_signal import TradingSignal
+from use_cases.trading.risk_manager import RiskManager
+from use_cases.trading.position_tracker import PositionTracker
+from infrastructure.news.cryptopanic_client import CryptoPanicClient
 from utils.logger import setup_logging, get_logger
 from utils.dashboard import Dashboard, print_startup_banner
 
@@ -51,11 +55,15 @@ class TradingAgent:
         self.tech_analyzer = TechnicalAnalyzer()
         self.volume_analyzer = VolumeAnalyzer(config, self.db)
         self.signal_generator = SignalGenerator()
+        self.omni_scanner = OmniScanner(config, self.market_data)
+        self.news_client = CryptoPanicClient(config)
+        self.sentiment_analyzer = SentimentAnalyzer(config, self.news_client)
         self.risk_manager = RiskManager(config, self.db)
         self.executor = OrderExecutor(config, self.market_data, self.db)
         self.position_tracker = PositionTracker(
             config, self.db, self.market_data,
             self.risk_manager, self.executor,
+            self.volume_analyzer
         )
         self.dashboard = Dashboard()
 
@@ -63,7 +71,7 @@ class TradingAgent:
         self.last_signals = {}
         self.last_volume_data = {}
 
-    def start(self):
+    async def start(self):
         """Start the trading agent."""
         print_startup_banner(self.config)
 
@@ -76,14 +84,14 @@ class TradingAgent:
             else:
                 logger.warning(issue)
 
-        # Validate trading pairs
+        # Validate trading pairs (Now using OmniScanner for async resolution)
         try:
-            valid_pairs = self.market_data.validate_pairs(self.config.trading.pairs)
+            valid_pairs = await self.omni_scanner.get_liquid_pairs()
             if not valid_pairs:
-                logger.error("❌ Tidak ada trading pairs yang valid!")
+                logger.error("❌ Tidak ada trading pairs yang valid atau liquid!")
                 sys.exit(1)
             self.config.trading.pairs = valid_pairs
-            logger.info(f"✅ Trading pairs aktif: {valid_pairs}")
+            logger.info(f"✅ Trading pairs aktif (Liquid): {len(valid_pairs)} markets")
         except Exception as e:
             logger.warning(f"⚠️ Could not validate pairs: {e}")
             logger.info("Using configured pairs as-is")
@@ -96,44 +104,61 @@ class TradingAgent:
         logger.info("🚀 AI Trading Agent started!")
 
         # Run immediately on start
-        self._run_cycle()
+        await self._run_cycle()
 
-        # Schedule periodic runs
-        interval = self.config.trading.analysis_interval_minutes
-        schedule.every(interval).minutes.do(self._run_cycle)
-
-        # Schedule position checks more frequently (every 5 min)
-        schedule.every(5).minutes.do(self._check_positions)
+        # Main Asynchronous Event Loop
+        analysis_interval_sec = self.config.trading.analysis_interval_minutes * 60
+        position_check_interval_sec = 5 * 60
+        
+        last_analysis_time = time.time()
+        last_position_check_time = time.time()
 
         logger.info(
-            f"📅 Scheduled: Analysis every {interval} min | "
+            f"📅 Scheduled: Analysis every {self.config.trading.analysis_interval_minutes} min | "
             f"Position check every 5 min"
         )
 
-        # Main loop
         while self.running:
-            schedule.run_pending()
-            time.sleep(10)
+            now = time.time()
+            
+            # Position Check Loop
+            if now - last_position_check_time >= position_check_interval_sec:
+                await self._check_positions()
+                last_position_check_time = now
+                
+            # Full Analysis Cycle Loop
+            if now - last_analysis_time >= analysis_interval_sec:
+                # Refresh liquid pairs periodically (in case market shifts)
+                logger.info("📡 Running Omni-Scanner to refresh liquid pairs...")
+                self.config.trading.pairs = await self.omni_scanner.get_liquid_pairs()
+                await self._run_cycle()
+                last_analysis_time = now
 
-    def _run_cycle(self):
-        """Run one complete analysis → signal → execution cycle."""
+            await asyncio.sleep(1) # Yield control back to loop avoiding CPU hog
+
+    async def _run_cycle(self):
+        """Run one complete analysis → signal → execution cycle for all pairs concurrently."""
         cycle_start = datetime.utcnow()
         logger.info(f"\n{'═' * 60}")
         logger.info(f"🔄 Analysis Cycle Start: {cycle_start.isoformat()}")
         logger.info(f"{'═' * 60}")
 
         try:
-            # ──── Step 1: Analyze Each Trading Pair ────
+            # ──── Step 1: Analyze All Trading Pairs Concurrently ────
+            # To avoid overloading the exchange, we can batch them.
+            # But ccxt async_support handles internal connection pooling and rate limiting if enabled.
+            # For 100+ pairs, we should probably chunk them. But assuming ~30 liquid pairs, gather is fine.
+            tasks = []
             for symbol in self.config.trading.pairs:
-                try:
-                    self._analyze_pair(symbol)
-                except Exception as e:
-                    logger.error(f"❌ Error analyzing {symbol}: {e}")
-
-                time.sleep(2)  # Rate limit between pairs
+                tasks.append(self._analyze_pair(symbol))
+                
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for symbol, res in zip(self.config.trading.pairs, results):
+                if isinstance(res, Exception):
+                     logger.error(f"❌ Error analyzing {symbol}: {res}")
 
             # ──── Step 3: Display Dashboard ────
-            self._display_dashboard()
+            await self._display_dashboard()
 
             duration = (datetime.utcnow() - cycle_start).total_seconds()
             logger.info(f"✅ Analysis cycle complete in {duration:.1f}s")
@@ -141,7 +166,7 @@ class TradingAgent:
         except Exception as e:
             logger.error(f"❌ Fatal error in analysis cycle: {e}")
 
-    def _analyze_pair(self, symbol: str):
+    async def _analyze_pair(self, symbol: str):
         """Analyze a single trading pair and execute if signal is strong."""
         logger.info(f"\n{'─' * 40}")
         logger.info(f"📊 Analyzing: {symbol}")
@@ -149,7 +174,7 @@ class TradingAgent:
 
         # ──── Fetch OHLCV Data ────
         try:
-            ohlcv_data = self.market_data.fetch_multi_timeframe(
+            ohlcv_data = await self.market_data.fetch_multi_timeframe(
                 symbol, ["1h", "4h"]
             )
         except Exception as e:
@@ -177,17 +202,20 @@ class TradingAgent:
             return
 
         # ──── Volume & Imbalance Analysis ────
-        # Scan for large trades and orderbook walls (saves to DB)
-        self.volume_tracker.scan_anomalies(symbol)
+        # scan for large trades and orderbook walls (saves to DB)
+        await self.volume_tracker.scan_anomalies(symbol)
 
         # Generate volume signal from recent DB events
         volume_signal = self.volume_analyzer.analyze(symbol)
         
         self.last_volume_data[symbol] = volume_signal.to_dict()
 
+        # ──── Sentimen & News Analysis (Fundamental) ────
+        sentiment_signal = await self.sentiment_analyzer.analyze_sentiment(symbol)
+        
         # ──── Generate Combined Signal (Multi-TF) ────
         trading_signal = self.signal_generator.generate_multi_timeframe(
-            tech_signals, volume_signal
+            tech_signals, volume_signal, sentiment_signal
         )
 
         # Save signal to database
@@ -205,9 +233,9 @@ class TradingAgent:
         logger.info(f"   Reason: {trading_signal.reason}")
 
         # ──── Execute Trading Decision ────
-        self._execute_signal(symbol, trading_signal, tech_signals, signal_id)
+        await self._execute_signal(symbol, trading_signal, tech_signals, signal_id)
 
-    def _execute_signal(
+    async def _execute_signal(
         self,
         symbol: str,
         signal: TradingSignal,
@@ -227,7 +255,7 @@ class TradingAgent:
 
         # Get current price and ATR
         try:
-            ticker = self.market_data.fetch_ticker(symbol)
+            ticker = await self.market_data.fetch_ticker(symbol)
             entry_price = ticker["last"]
         except Exception as e:
             logger.error(f"❌ Cannot get price for {symbol}: {e}")
@@ -246,7 +274,7 @@ class TradingAgent:
             equity = 300_000
         else:
             try:
-                balance = self.market_data.fetch_balance()
+                balance = await self.market_data.fetch_balance()
                 equity = balance.get("free", {}).get("IDR", 0)
             except Exception:
                 equity = 0
@@ -267,14 +295,14 @@ class TradingAgent:
             return
 
         # Add signal reference
-        trade_result = self.executor.execute(order_plan)
+        trade = await self.executor.execute(order_plan)
 
-        if trade_result:
+        if trade:
             # Update signal_id in trade
             cursor = self.db.conn.cursor()
             cursor.execute(
                 "UPDATE trades SET signal_id = ? WHERE id = ?",
-                (signal_id, trade_result["id"])
+                (signal_id, trade["id"])
             )
             self.db.conn.commit()
 
@@ -286,20 +314,21 @@ class TradingAgent:
                 f"Risk: {order_plan.risk_amount:,.0f} IDR"
             )
 
-    def _check_positions(self):
+    async def _check_positions(self):
         """Check open positions for SL/TP hits."""
         try:
-            actions = self.position_tracker.check_positions()
+            actions = await self.position_tracker.check_positions()
+            summary = await self.position_tracker.get_portfolio_summary()
             if actions:
                 for action in actions:
                     logger.trade(f"⚡ Position update: {action}")
         except Exception as e:
             logger.error(f"❌ Error checking positions: {e}")
 
-    def _display_dashboard(self):
+    async def _display_dashboard(self):
         """Display the CLI dashboard."""
         try:
-            portfolio = self.position_tracker.get_portfolio_summary()
+            portfolio = await self.position_tracker.get_portfolio_summary()
             self.dashboard.display(
                 portfolio=portfolio,
                 last_signals=self.last_signals,
@@ -367,7 +396,10 @@ def main():
 
     # Start agent
     agent = TradingAgent(config)
-    agent.start()
+    try:
+        asyncio.run(agent.start())
+    except KeyboardInterrupt:
+        logger.info("Shutdown by user.")
 
 
 if __name__ == "__main__":

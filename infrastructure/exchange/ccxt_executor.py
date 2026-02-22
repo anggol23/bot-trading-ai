@@ -6,16 +6,17 @@ import time
 from datetime import datetime
 from typing import Dict, Any, Optional
 
-from config import Config
-from data.market_data import MarketDataFetcher
-from data.database import Database
-from trading.risk_manager import OrderPlan
+from config.settings import Config
+from core.interfaces.market_data_port import IMarketData
+from core.interfaces.database_port import IDatabase
+from core.interfaces.executor_port import IExecutor
+from core.entities.order_plan import OrderPlan
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 
-class OrderExecutor:
+class OrderExecutor(IExecutor):
     """
     Executes trading orders in paper or live mode.
     
@@ -23,13 +24,13 @@ class OrderExecutor:
     Live mode: sends real orders via ccxt to Indodax
     """
 
-    def __init__(self, config: Config, market_data: MarketDataFetcher, db: Database):
+    def __init__(self, config: Config, market_data: IMarketData, db: IDatabase):
         self.config = config
         self.market = market_data
         self.db = db
         self.mode = config.trading.mode
 
-    def execute(self, plan: OrderPlan) -> Optional[Dict[str, Any]]:
+    async def execute(self, plan: OrderPlan) -> Optional[Dict[str, Any]]:
         """
         Execute an order plan.
         
@@ -46,14 +47,14 @@ class OrderExecutor:
             return None
 
         if self.mode == "paper":
-            return self._execute_paper(plan)
+            return await self._execute_paper(plan)
         elif self.mode == "live":
-            return self._execute_live(plan)
+            return await self._execute_live(plan)
         else:
             logger.error(f"❌ Unknown trading mode: {self.mode}")
             return None
 
-    def _execute_paper(self, plan: OrderPlan) -> Dict[str, Any]:
+    async def _execute_paper(self, plan: OrderPlan) -> Dict[str, Any]:
         """Simulate order execution (paper trading)."""
         trade = {
             "symbol": plan.symbol,
@@ -80,7 +81,7 @@ class OrderExecutor:
 
         return trade
 
-    def _execute_live(self, plan: OrderPlan) -> Optional[Dict[str, Any]]:
+    async def _execute_live(self, plan: OrderPlan) -> Optional[Dict[str, Any]]:
         """Execute real order via ccxt to Indodax."""
         if not self.config.indodax.api_key:
             logger.error("❌ Cannot execute live order: No API key configured")
@@ -96,7 +97,9 @@ class OrderExecutor:
                 )
 
                 # Execute market order via ccxt
-                order = self.market.exchange.create_order(
+                import asyncio
+                # Use standard retry with async sleep
+                order = await self.market.exchange.create_order(
                     symbol=plan.symbol,
                     type="market",
                     side=plan.side,
@@ -137,7 +140,7 @@ class OrderExecutor:
                 if attempt < max_retries - 1:
                     wait = (attempt + 1) * 2  # Exponential backoff
                     logger.info(f"⏳ Retrying in {wait}s...")
-                    time.sleep(wait)
+                    await asyncio.sleep(wait)
                 else:
                     logger.error(
                         f"❌ All {max_retries} attempts failed for "
@@ -145,7 +148,7 @@ class OrderExecutor:
                     )
                     return None
 
-    def close_position(
+    async def close_position(
         self,
         trade: Dict[str, Any],
         current_price: float,
@@ -170,7 +173,7 @@ class OrderExecutor:
             if self.mode == "live":
                 # Execute opposite order to close
                 close_side = "sell" if side == "buy" else "buy"
-                self.market.exchange.create_order(
+                await self.market.exchange.create_order(
                     symbol=symbol,
                     type="market",
                     side=close_side,

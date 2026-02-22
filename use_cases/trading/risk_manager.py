@@ -3,48 +3,14 @@ Risk Manager - Strict position sizing and risk control.
 Max 2% equity per position, mandatory stop loss, daily drawdown limit.
 """
 
-from dataclasses import dataclass
 from typing import Dict, List, Optional, Any
 
-from config import Config
-from data.database import Database
+from config.settings import Config
+from core.interfaces.database_port import IDatabase
+from core.entities.order_plan import OrderPlan
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
-
-
-@dataclass
-class OrderPlan:
-    """Calculated order with risk-managed parameters."""
-    symbol: str
-    side: str           # "buy" or "sell"
-    entry_price: float
-    position_size: float  # Amount in base currency (e.g. BTC)
-    cost: float          # Total cost in quote currency (e.g. IDR)
-    stop_loss: float
-    take_profit: float
-    risk_amount: float   # Max loss in quote currency
-    risk_percent: float  # Risk as % of equity
-    rr_ratio: float      # Risk:Reward ratio
-
-    approved: bool = True
-    rejection_reason: str = ""
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "symbol": self.symbol,
-            "side": self.side,
-            "entry_price": self.entry_price,
-            "position_size": self.position_size,
-            "cost": self.cost,
-            "stop_loss": self.stop_loss,
-            "take_profit": self.take_profit,
-            "risk_amount": self.risk_amount,
-            "risk_percent": self.risk_percent,
-            "rr_ratio": self.rr_ratio,
-            "approved": self.approved,
-            "rejection_reason": self.rejection_reason,
-        }
 
 
 class RiskManager:
@@ -59,7 +25,7 @@ class RiskManager:
     - Daily drawdown limit: 5%
     """
 
-    def __init__(self, config: Config, db: Database):
+    def __init__(self, config: Config, db: IDatabase):
         self.config = config
         self.db = db
         self.risk_per_trade = config.risk.risk_per_trade
@@ -90,7 +56,7 @@ class RiskManager:
             OrderPlan with calculated parameters (may be rejected)
         """
         # ──── Pre-flight checks ────
-        rejection = self._pre_check(symbol, equity)
+        rejection = self._pre_check(symbol, equity, entry_price, side)
         if rejection:
             return self._rejected_order(symbol, side, entry_price, rejection)
 
@@ -111,8 +77,18 @@ class RiskManager:
                 f"Stop loss negatif: {stop_loss:.0f} (ATR terlalu besar)"
             )
 
-        # ──── Calculate Position Size (2% rule) ────
-        risk_amount = equity * self.risk_per_trade  # Max loss in IDR
+        # ──── Calculate Position Size ────
+        # Dynamically scale down risk if Pyramiding (Scale-in)
+        open_trades = self.db.get_open_trades()
+        symbol_trades = [t for t in open_trades if t["symbol"] == symbol]
+        
+        active_risk_pct = self.risk_per_trade
+        if symbol_trades:
+            # Halve risk for each subsequent pyramid bullet: 2% -> 1% -> 0.5%
+            active_risk_pct = self.risk_per_trade / (2 ** len(symbol_trades))
+            logger.info(f"🔼 Pyramiding Entry #{len(symbol_trades)+1} for {symbol}. Scaling risk to {active_risk_pct*100:.2f}%")
+
+        risk_amount = equity * active_risk_pct  # Max loss in IDR
         position_size = risk_amount / sl_distance   # Amount in base currency
 
         # Calculate total cost
@@ -143,7 +119,7 @@ class RiskManager:
             stop_loss=round(stop_loss, 2),
             take_profit=round(take_profit, 2),
             risk_amount=round(risk_amount, 2),
-            risk_percent=round(self.risk_per_trade * 100, 2),
+            risk_percent=round(active_risk_pct * 100, 2),
             rr_ratio=round(rr_ratio, 2),
             approved=True,
         )
@@ -152,16 +128,16 @@ class RiskManager:
             f"📋 Order Plan: {side.upper()} {symbol} | "
             f"Entry: {entry_price:,.0f} | Size: {position_size:.8f} | "
             f"SL: {stop_loss:,.0f} | TP: {take_profit:,.0f} | "
-            f"Risk: {risk_amount:,.0f} IDR ({self.risk_per_trade*100:.1f}%) | "
+            f"Risk: {risk_amount:,.0f} IDR ({active_risk_pct*100:.2f}%) | "
             f"R:R = 1:{rr_ratio:.1f}"
         )
 
         return plan
 
-    def _pre_check(self, symbol: str, equity: float) -> Optional[str]:
+    def _pre_check(self, symbol: str, equity: float, current_price: float, side: str) -> Optional[str]:
         """Run pre-flight checks before order calculation."""
 
-        # Check max open positions
+        # Check max open positions overall portfolio
         open_trades = self.db.get_open_trades()
         if len(open_trades) >= self.max_positions:
             return (
@@ -169,10 +145,27 @@ class RiskManager:
                 f"Tutup posisi yang ada sebelum membuka baru"
             )
 
-        # Check if already have position in this symbol
+        # Check if already have position in this symbol for Pyramiding
         symbol_trades = [t for t in open_trades if t["symbol"] == symbol]
         if symbol_trades:
-            return f"Sudah ada posisi terbuka di {symbol}"
+            if not self.config.risk.enable_pyramiding:
+                return f"Sudah ada posisi terbuka di {symbol} (Pyramiding dimatikan)"
+            
+            # Max 3 active layers per coin
+            if len(symbol_trades) >= 3:
+                return f"Batas Pyramiding maksimal tercapai (3 layers) untuk {symbol}"
+                
+            # Check if existing layers meet profit threshold
+            for t in symbol_trades:
+                if t["side"] != side:
+                    return f"Sudah ada posisi {t['side']} di {symbol}. Tidak bisa membuka posisi {side} (Hedging ditolak)"
+                
+                entry = t["price"]
+                profit_pct = ((current_price - entry) / entry) * 100 if side == "buy" else ((entry - current_price) / entry) * 100
+                
+                threshold = self.config.risk.pyramid_profit_threshold_pct
+                if profit_pct < threshold:
+                    return f"Posisi {symbol} saat ini belum mencapai profit aman ({profit_pct:.1f}% < {threshold}%)"
 
         # Check daily drawdown
         today_trades = self.db.get_trades_today()

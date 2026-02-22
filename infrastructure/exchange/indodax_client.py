@@ -1,21 +1,23 @@
 """
-Market Data Fetcher - OHLCV & exchange data via ccxt.
-Connects to Indodax exchange and fetches price data for analysis.
+Market Data Fetcher - OHLCV & exchange data via ccxt.async_support.
+Connects to Indodax exchange and fetches price data for analysis concurrently.
 """
 
 import time
-import ccxt
+import asyncio
+import ccxt.async_support as ccxt
 import pandas as pd
 from typing import List, Dict, Optional, Any
 from datetime import datetime, timedelta
 
-from config import Config
+from core.interfaces.market_data_port import IMarketData
+from config.settings import Config
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 
-class MarketDataFetcher:
+class MarketDataFetcher(IMarketData):
     """Fetches market data from Indodax via ccxt."""
 
     def __init__(self, config: Config):
@@ -34,18 +36,18 @@ class MarketDataFetcher:
         self.exchange = ccxt.indodax(exchange_params)
         self._markets_loaded = False
 
-    def _ensure_markets(self):
+    async def _ensure_markets(self):
         """Load markets if not already loaded."""
         if not self._markets_loaded:
             try:
-                self.exchange.load_markets()
+                await self.exchange.load_markets()
                 self._markets_loaded = True
                 logger.info(f"📡 Loaded {len(self.exchange.markets)} markets from Indodax")
             except Exception as e:
                 logger.error(f"❌ Failed to load markets: {e}")
                 raise
 
-    def fetch_ohlcv(
+    async def fetch_ohlcv(
         self,
         symbol: str,
         timeframe: str = "1h",
@@ -64,12 +66,12 @@ class MarketDataFetcher:
         Returns:
             DataFrame with columns: timestamp, open, high, low, close, volume
         """
-        self._ensure_markets()
+        await self._ensure_markets()
 
         try:
             logger.info(f"📊 Fetching {limit} x {timeframe} candles for {symbol}")
 
-            ohlcv = self.exchange.fetch_ohlcv(
+            ohlcv = await self.exchange.fetch_ohlcv(
                 symbol=symbol,
                 timeframe=timeframe,
                 limit=limit,
@@ -106,45 +108,46 @@ class MarketDataFetcher:
             logger.error(f"❌ Unexpected error fetching OHLCV for {symbol}: {e}")
             raise
 
-    def fetch_multi_timeframe(
+    async def fetch_multi_timeframe(
         self, symbol: str, timeframes: List[str] = None
     ) -> Dict[str, pd.DataFrame]:
         """
         Fetch OHLCV data for multiple timeframes simultaneously.
         Used for multi-timeframe confirmation.
-
-        Args:
-            symbol: Trading pair e.g. 'BTC/IDR'
-            timeframes: List of timeframes e.g. ['1h', '4h', '1d']
-
-        Returns:
-            Dict mapping timeframe to DataFrame
         """
         if timeframes is None:
             timeframes = ["1h", "4h", "1d"]
 
-        result = {}
+        results = {}
+        
+        # Create concurrent tasks
+        tasks = []
         for tf in timeframes:
-            try:
-                result[tf] = self.fetch_ohlcv(symbol, tf)
-                time.sleep(1)  # Rate limit between calls
-            except Exception as e:
-                logger.error(f"❌ Failed to fetch {tf} data for {symbol}: {e}")
-                result[tf] = pd.DataFrame()
+            tasks.append(self.fetch_ohlcv(symbol, tf))
+            
+        # Await all simultaneously
+        dfs = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        for tf, df_result in zip(timeframes, dfs):
+            if isinstance(df_result, Exception):
+                logger.error(f"Failed to fetch {tf} for {symbol}: {df_result}")
+                results[tf] = pd.DataFrame()
+            else:
+                results[tf] = df_result
 
-        return result
+        return results
 
-    def fetch_ticker(self, symbol: str) -> Dict[str, Any]:
+    async def fetch_ticker(self, symbol: str) -> Dict[str, Any]:
         """
         Fetch current ticker data for a symbol.
         
         Returns:
             Dict with: last, bid, ask, high, low, volume, etc.
         """
-        self._ensure_markets()
+        await self._ensure_markets()
 
         try:
-            ticker = self.exchange.fetch_ticker(symbol)
+            ticker = await self.exchange.fetch_ticker(symbol)
             logger.info(
                 f"💹 {symbol} Last: {ticker['last']:,.0f} IDR | "
                 f"Vol24h: {ticker.get('baseVolume', 0):,.4f}"
@@ -154,17 +157,17 @@ class MarketDataFetcher:
             logger.error(f"❌ Failed to fetch ticker for {symbol}: {e}")
             raise
 
-    def fetch_order_book(self, symbol: str, limit: int = 20) -> Dict[str, Any]:
+    async def fetch_order_book(self, symbol: str, limit: int = 20) -> Dict[str, Any]:
         """
         Fetch order book depth.
         
         Returns:
             Dict with 'bids' and 'asks' arrays.
         """
-        self._ensure_markets()
+        await self._ensure_markets()
 
         try:
-            order_book = self.exchange.fetch_order_book(symbol, limit)
+            order_book = await self.exchange.fetch_order_book(symbol, limit)
             bid_vol = sum([b[1] for b in order_book["bids"][:10]])
             ask_vol = sum([a[1] for a in order_book["asks"][:10]])
             ratio = bid_vol / ask_vol if ask_vol > 0 else 0
@@ -179,26 +182,27 @@ class MarketDataFetcher:
             logger.error(f"❌ Failed to fetch order book for {symbol}: {e}")
             raise
 
-    def fetch_trades(self, symbol: str, limit: int = 50) -> List[Dict[str, Any]]:
+    async def fetch_trades(self, symbol: str, limit: int = 50) -> List[Dict[str, Any]]:
         """
         Fetch recent public trades for a symbol.
         Used to detect volume anomalies and spikes.
         """
-        self._ensure_markets()
+        await self._ensure_markets()
         try:
-            trades = self.exchange.fetch_trades(symbol, limit=limit)
+            trades = await self.exchange.fetch_trades(symbol, limit=limit)
             return trades
         except Exception as e:
             logger.error(f"❌ Failed to fetch trades for {symbol}: {e}")
             return []
 
-    def fetch_balance(self) -> Dict[str, Any]:
+    async def fetch_balance(self) -> Dict[str, Any]:
         """
         Fetch account balance (requires API key).
         
         Returns:
             Dict with balance info per currency.
         """
+        await self._ensure_markets()
         if not self.config.indodax.api_key:
             logger.warning("⚠️ No API key — returning mock balance for paper trading")
             return {
@@ -208,7 +212,7 @@ class MarketDataFetcher:
             }
 
         try:
-            balance = self.exchange.fetch_balance()
+            balance = await self.exchange.fetch_balance()
             idr_total = balance.get("total", {}).get("IDR", 0)
             logger.info(f"💰 Balance: {idr_total:,.0f} IDR")
             return balance
@@ -216,17 +220,17 @@ class MarketDataFetcher:
             logger.error(f"❌ Failed to fetch balance: {e}")
             raise
 
-    def get_available_pairs(self) -> List[str]:
+    async def get_available_pairs(self) -> List[str]:
         """Get all available trading pairs on Indodax."""
-        self._ensure_markets()
+        await self._ensure_markets()
         pairs = list(self.exchange.markets.keys())
         idr_pairs = [p for p in pairs if p.endswith("/IDR")]
         logger.info(f"📋 Available IDR pairs: {len(idr_pairs)}")
         return idr_pairs
 
-    def validate_pairs(self, pairs: List[str]) -> List[str]:
+    async def validate_pairs(self, pairs: List[str]) -> List[str]:
         """Validate that requested pairs exist on the exchange."""
-        available = self.get_available_pairs()
+        available = await self.get_available_pairs()
         valid = []
         for pair in pairs:
             if pair in available:

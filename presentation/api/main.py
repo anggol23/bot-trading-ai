@@ -1,13 +1,13 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from database import (
+from presentation.api.database import (
     get_portfolio_summary,
     get_active_positions,
     get_recent_signals,
     get_volume_anomalies,
     get_equity_curve
 )
-from models import (
+from presentation.api.models import (
     PortfolioSummaryResponse,
     PositionResponse,
     SignalResponse,
