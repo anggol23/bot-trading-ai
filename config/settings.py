@@ -48,7 +48,7 @@ class NewsConfig:
 @dataclass
 class TradingConfig:
     mode: str = "paper"                   # "paper" or "live"
-    pairs: List[str] = field(default_factory=lambda: ["BTC/IDR", "ETH/IDR", "SOL/IDR"])
+    pairs: List[str] = field(default_factory=lambda: ["BTC/IDR", "ETH/IDR", "SOL/IDR", "ADA/IDR", "DOGE/IDR", "XRP/IDR", "PEPE/IDR"])
     timeframe: str = "1h"
     analysis_interval_minutes: int = 60
 
@@ -93,7 +93,7 @@ class Config:
             enable_sentiment_veto=os.getenv("ENABLE_SENTIMENT_VETO", "true").lower() == "true",
         )
 
-        pairs_str = os.getenv("TRADING_PAIRS", "BTC/IDR,ETH/IDR,SOL/IDR")
+        pairs_str = os.getenv("TRADING_PAIRS", "BTC/IDR,ETH/IDR,SOL/IDR,ADA/IDR,DOGE/IDR,XRP/IDR,PEPE/IDR")
         self.trading = TradingConfig(
             mode=os.getenv("TRADING_MODE", "paper"),
             pairs=[p.strip() for p in pairs_str.split(",")],
