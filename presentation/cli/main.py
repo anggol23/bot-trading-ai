@@ -263,11 +263,33 @@ class TradingAgent:
     ):
         """Execute trading decision based on signal."""
 
-        # Only act on BUY or SELL signals
+        # Check open positions for this symbol
+        open_trades = self.db.get_open_trades(symbol)
+
+        # Handle SELL signals as Close operations only (Spot Market Enforcement)
+        if signal.action in ("STRONG_SELL", "SELL"):
+            if not open_trades:
+                logger.info(f"📊 {symbol}: HOLD — Ignoring SELL signal (No active position to close on Spot Market)")
+                return
+            
+            # We have open BUY positions, let's close them
+            # Get current price
+            try:
+                ticker = await self.market_data.fetch_ticker(symbol)
+                current_price = ticker["last"]
+            except Exception as e:
+                logger.error(f"❌ Cannot get price to close {symbol}: {e}")
+                return
+
+            for trade in open_trades:
+                if trade["side"] == "buy":
+                    reason = f"SIGNAL: {signal.action} (Confidence: {signal.confidence:.0%})"
+                    await self.executor.close_position(trade, current_price, reason)
+            return
+
+        # Handle BUY signals
         if signal.action in ("STRONG_BUY", "BUY"):
             side = "buy"
-        elif signal.action in ("STRONG_SELL", "SELL"):
-            side = "sell"
         else:
             logger.info(f"📊 {symbol}: HOLD — No action taken")
             return
