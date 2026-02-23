@@ -20,14 +20,18 @@ def reset_database():
             "DELETE FROM portfolio_snapshots;",
             "DELETE FROM volume_anomalies;",
             "DELETE FROM signals;",
-            "DELETE FROM candles;",
-            "VACUUM;" # Optimize database size after deletion
+            "DELETE FROM candles;"
         ]
         
         for q in queries:
             c.execute(q)
             
         conn.commit()
+        
+        # Mengeksekusi VACUUM secara terpisah di luar transaksi
+        conn.isolation_level = None
+        c.execute("VACUUM;")
+        conn.isolation_level = "" # kembalikan ke default
         conn.close()
         
         print("✅ Berhasil! Seluruh riwayat trading, sinyal, dan candlestick telah dibersihkan.")
