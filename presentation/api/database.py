@@ -2,7 +2,7 @@ import sqlite3
 import os
 from datetime import datetime
 from typing import List, Dict, Any
-from presentation.api.models import PortfolioSummaryResponse, PositionResponse, SignalResponse, VolumeAnomalyResponse, ChartDataPoint
+from presentation.api.models import PortfolioSummaryResponse, PositionResponse, SignalResponse, VolumeAnomalyResponse, ChartDataPoint, CandleResponse
 
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "trading_agent.db")
 
@@ -143,3 +143,39 @@ def get_equity_curve() -> List[ChartDataPoint]:
         time=r['snapshot_at'].split('.')[0].replace('T', ' '),
         value=r['total_equity']
     ) for r in rows]
+
+def get_latest_candles(symbol: str, timeframe: str = "15m", limit: int = 100) -> List[CandleResponse]:
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("""
+        SELECT timestamp, open, high, low, close, volume 
+        FROM candles 
+        WHERE symbol = ? AND timeframe = ?
+        ORDER BY timestamp DESC LIMIT ?
+    """, (symbol, timeframe, limit))
+    rows = c.fetchall()
+    conn.close()
+    
+    # Needs to be returned in ascending order for the chart (from oldest to newest)
+    candles = []
+    for r in reversed(rows):
+        row_dict = dict(r)
+        
+        # Convert millis timestamp to ISO string if needed by apexcharts,
+        # or just pass timestamp if chart formatter handles it
+        t_ms = row_dict['timestamp']
+        if isinstance(t_ms, str):
+            t_iso = t_ms
+        else:
+            t_iso = datetime.fromtimestamp(t_ms/1000.0).isoformat()
+            
+        candles.append(CandleResponse(
+            timestamp=t_iso,
+            open=row_dict['open'],
+            high=row_dict['high'],
+            low=row_dict['low'],
+            close=row_dict['close'],
+            volume=row_dict['volume']
+        ))
+        
+    return candles

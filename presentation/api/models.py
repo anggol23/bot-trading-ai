@@ -41,3 +41,11 @@ class VolumeAnomalyResponse(BaseModel):
 class ChartDataPoint(BaseModel):
     time: str # Format "YYYY-MM-DD" or timestamp
     value: float # Equity or PnL
+
+class CandleResponse(BaseModel):
+    timestamp: str
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float

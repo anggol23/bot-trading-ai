@@ -5,14 +5,16 @@ from presentation.api.database import (
     get_active_positions,
     get_recent_signals,
     get_volume_anomalies,
-    get_equity_curve
+    get_equity_curve,
+    get_latest_candles
 )
 from presentation.api.models import (
     PortfolioSummaryResponse,
     PositionResponse,
     SignalResponse,
     VolumeAnomalyResponse,
-    ChartDataPoint
+    ChartDataPoint,
+    CandleResponse
 )
 from typing import List
 
@@ -55,3 +57,10 @@ def api_volume_anomalies(limit: int = 20):
 def api_equity_curve():
     """Get the historical equity curve data for charting."""
     return get_equity_curve()
+
+@app.get("/api/candles/{symbol}", response_model=List[CandleResponse])
+def api_candles(symbol: str, timeframe: str = "15m", limit: int = 100):
+    """Get historical OHLCV candles for charting."""
+    # Handle api paths like SOL-IDR converting it to SOL/IDR 
+    symbol = symbol.replace('-', '/').upper()
+    return get_latest_candles(symbol, timeframe, limit)

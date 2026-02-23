@@ -9,9 +9,7 @@ import {
   BarChart2,
   List as ListIcon
 } from 'lucide-react';
-import {
-  AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer
-} from 'recharts';
+import ReactApexChart from 'react-apexcharts';
 
 const API_BASE = '/api';
 
@@ -60,7 +58,8 @@ function App() {
   const [positions, setPositions] = useState<Position[]>([]);
   const [anomalies, setAnomalies] = useState<VolumeAnomaly[]>([]);
   const [_, setSignals] = useState<Signal[]>([]);
-  const [equityData, setEquityData] = useState<any[]>([]);
+  const [candlesData, setCandlesData] = useState<any[]>([]);
+  const [activeSymbol, setActiveSymbol] = useState('SOL-IDR');
 
   const [loading, setLoading] = useState(true);
 
@@ -68,19 +67,25 @@ function App() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [portRes, posRes, anomRes, sigRes, eqRes] = await Promise.all([
+        const [portRes, posRes, anomRes, sigRes, candleRes] = await Promise.all([
           axios.get(`${API_BASE}/portfolio`),
           axios.get(`${API_BASE}/positions`),
           axios.get(`${API_BASE}/volume`),
           axios.get(`${API_BASE}/signals`),
-          axios.get(`${API_BASE}/equity`)
+          axios.get(`${API_BASE}/candles/${activeSymbol}`)
         ]);
 
         setPortfolio(portRes.data);
         setPositions(posRes.data);
         setAnomalies(anomRes.data);
         setSignals(sigRes.data);
-        setEquityData(eqRes.data);
+
+        // Map backend candles to ApexCharts series format
+        const formattedCandles = candleRes.data.map((c: any) => ({
+          x: new Date(c.timestamp).getTime(),
+          y: [c.open, c.high, c.low, c.close]
+        }));
+        setCandlesData([{ data: formattedCandles }]);
 
       } catch (err) {
         console.error("Failed to fetch data", err);
@@ -199,45 +204,64 @@ function App() {
       {/* CHARTS ROW */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
 
-        {/* EQUITY CURVE */}
+        {/* CANDLESTICK CHART */}
         <div className="lg:col-span-2 glass-card px-8 py-6 rounded-2xl flex flex-col">
-          <div className="flex items-center gap-2 mb-6">
-            <BarChart2 className="w-5 h-5 text-gray-400" />
-            <h2 className="text-lg font-bold text-white tracking-wide">Equity Curve</h2>
+          <div className="flex justify-between items-center mb-6">
+            <div className="flex items-center gap-2">
+              <BarChart2 className="w-5 h-5 text-gray-400" />
+              <h2 className="text-lg font-bold text-white tracking-wide">Market Chart</h2>
+            </div>
+            <select
+              className="bg-[#1e293b] text-gray-200 border border-gray-700 rounded-lg px-3 py-1 text-sm outline-none focus:border-blue-500"
+              value={activeSymbol}
+              onChange={(e) => setActiveSymbol(e.target.value)}
+            >
+              <option value="SOL-IDR">SOL/IDR</option>
+              <option value="ETH-IDR">ETH/IDR</option>
+              <option value="BTC-IDR">BTC/IDR</option>
+            </select>
           </div>
-          <div className="h-[400px] w-full">
-            {equityData.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={equityData}>
-                  <defs>
-                    <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <XAxis
-                    dataKey="time"
-                    stroke="#475569"
-                    tickFormatter={(val: string) => val.split(' ')[1].slice(0, 5)}
-                    tick={{ fill: '#94a3b8', fontSize: 12 }}
-                  />
-                  <YAxis
-                    domain={['auto', 'auto']}
-                    stroke="#475569"
-                    tickFormatter={(val) => `Rp ${(val / 1000000).toFixed(1)}M`}
-                    tick={{ fill: '#94a3b8', fontSize: 12 }}
-                    width={80}
-                  />
-                  <Tooltip
-                    contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', borderRadius: '8px', color: '#fff' }}
-                    itemStyle={{ color: '#3b82f6' }}
-                  />
-                  <Area type="natural" dataKey="value" stroke="#3b82f6" strokeWidth={3} fillOpacity={1} fill="url(#colorValue)" />
-                </AreaChart>
-              </ResponsiveContainer>
+          <div className="h-[400px] w-full text-black">
+            {candlesData.length > 0 && candlesData[0].data.length > 0 ? (
+              <ReactApexChart
+                options={{
+                  chart: {
+                    type: 'candlestick',
+                    background: 'transparent',
+                    toolbar: { show: true, tools: { download: false } },
+                    animations: { enabled: false }
+                  },
+                  theme: { mode: 'dark' },
+                  plotOptions: {
+                    candlestick: {
+                      colors: {
+                        upward: '#10b981', // Green
+                        downward: '#ef4444' // Red
+                      }
+                    }
+                  },
+                  xaxis: {
+                    type: 'datetime',
+                    labels: { style: { colors: '#94a3b8' } },
+                    axisBorder: { color: '#334155' },
+                    axisTicks: { color: '#334155' }
+                  },
+                  yaxis: {
+                    tooltip: { enabled: true },
+                    labels: {
+                      style: { colors: '#94a3b8' },
+                      formatter: (value) => value.toLocaleString('id-ID')
+                    }
+                  },
+                  grid: { borderColor: '#334155', strokeDashArray: 4 }
+                }}
+                series={candlesData}
+                type="candlestick"
+                height="100%"
+              />
             ) : (
               <div className="h-full flex items-center justify-center text-gray-500">
-                <p>Not enough history recorded</p>
+                <p>Waiting for Market Data...</p>
               </div>
             )}
           </div>
