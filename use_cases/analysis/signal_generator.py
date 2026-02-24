@@ -201,11 +201,11 @@ class SignalGenerator:
         if tech and tech.trend == "NEUTRAL" and volume.net_flow == "ACCUMULATING":
             return TradingSignal(
                 symbol=symbol,
-                action="HOLD",
-                confidence=round(volume.confidence * 0.3, 2),
+                action="BUY",
+                confidence=round(volume.confidence * 0.6, 2),
                 reason=(
                     f"📊 Trend NEUTRAL + Terjadi AKUMULASI | "
-                    f"Menunggu konfirmasi trend. Imbalance: {volume.imbalance_score:+.3f}"
+                    f"Volume kuat mengambil alih. Imbalance: {volume.imbalance_score:+.3f}"
                 ),
                 technical=tech,
                 volume=volume,
@@ -214,8 +214,8 @@ class SignalGenerator:
         if tech and tech.trend == "NEUTRAL" and volume.net_flow == "DISTRIBUTING":
             return TradingSignal(
                 symbol=symbol,
-                action="HOLD",
-                confidence=round(volume.confidence * 0.3, 2),
+                action="SELL",
+                confidence=round(volume.confidence * 0.6, 2),
                 reason=(
                     f"📊 Trend NEUTRAL + Terjadi DISTRIBUSI | "
                     f"Waspada potensi penurunan. Imbalance: {volume.imbalance_score:+.3f}"
@@ -274,6 +274,8 @@ class SignalGenerator:
         tech_signals: Dict[str, TechnicalSignal],
         volume_signal: VolumeSignal,
         sentiment_signal: Optional[Dict[str, Any]] = None,
+        daily_target_met: bool = False,
+        market_regime: str = "NORMAL",
     ) -> TradingSignal:
         """
         Generate signal using multi-timeframe confirmation.
@@ -329,14 +331,43 @@ class SignalGenerator:
                 primary.confidence *= 0.8
                 primary.action = "BUY" if primary.action == "STRONG_BUY" else "SELL"
                 primary.reason += f" | ⚠️ MTF: Tidak ada konfirmasi, di-downgrade menjadi regular"
+            elif primary.action in ("BUY", "SELL"):
+                # Pass through regular signals with reduced confidence, without becoming HOLD
+                primary.confidence *= 0.6
+                primary.reason += f" | ⚠️ MTF: Tidak ada konfirmasi multi-timeframe"
             else:
-                # Downgrade regular signals to HOLD without confirmation
+                # Ensure HOLD remains HOLD
                 primary.action = "HOLD"
                 primary.confidence *= 0.5
                 primary.reason += f" | ⚠️ MTF: Tidak ada konfirmasi multi-timeframe"
             
             primary.timeframes_aligned = max(buy_signals, sell_signals)
             primary.total_timeframes = total
+
+        # Apply Target Profit (Minimum Profit Mode) logic
+        if not daily_target_met:
+            # Not yet met daily target -> AGGRESSIVE HUNTER MODE
+            # Boost confidence slightly to trigger more trades
+            primary.confidence = min(1.0, primary.confidence * 1.5)
+            primary.reason += " | 🎯 HUNTER MODE: Mengejar target harian"
+        else:
+            # Target met -> RELAXED / ELITE MODE
+            # Penalize confidence so only A+ setups generate trades
+            primary.confidence *= 0.6
+            primary.reason += " | 🛡️ ELITE MODE: Target harian tercapai, sangat selektif"
+
+        # Apply Market Regime Adaptation
+        if market_regime == "CHOPPY":
+            primary.confidence *= 0.5
+            primary.reason += " | 🌊 CHOPPY MARKET: Waspada sinyal palsu"
+        elif market_regime == "VOLATILE":
+            primary.reason += " | ⚡ VOLATILE MARKET: Perhatikan SL"
+        elif market_regime == "TRENDING_BULL" and primary.action in ("BUY", "STRONG_BUY"):
+            primary.confidence = min(1.0, primary.confidence * 1.2)
+            primary.reason += " | 🚀 STRONG BULL REGIME: Sinyal Buy dikuatkan"
+        elif market_regime == "TRENDING_BEAR" and primary.action in ("SELL", "STRONG_SELL"):
+            primary.confidence = min(1.0, primary.confidence * 1.2)
+            primary.reason += " | 🩸 STRONG BEAR REGIME: Sinyal Sell dikuatkan"
 
         logger.info(
             f"📊 {primary.symbol} Multi-TF Signal: {primary.action} | "

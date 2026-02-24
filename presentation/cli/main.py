@@ -26,6 +26,7 @@ from use_cases.analysis.volume_analyzer import VolumeAnalyzer
 from use_cases.analysis.signal_generator import SignalGenerator
 from use_cases.analysis.omni_scanner import OmniScanner
 from use_cases.analysis.sentiment_analyzer import SentimentAnalyzer
+from use_cases.analysis.market_regime import MarketRegimeAnalyzer
 from core.entities.trading_signal import TradingSignal
 from use_cases.trading.risk_manager import RiskManager
 from use_cases.trading.position_tracker import PositionTracker
@@ -58,6 +59,7 @@ class TradingAgent:
         self.omni_scanner = OmniScanner(config, self.market_data)
         self.news_client = CryptoPanicClient(config)
         self.sentiment_analyzer = SentimentAnalyzer(config, self.news_client)
+        self.market_regime_analyzer = MarketRegimeAnalyzer(self.market_data, self.tech_analyzer)
         self.risk_manager = RiskManager(config, self.db)
         self.executor = OrderExecutor(config, self.market_data, self.db)
         self.position_tracker = PositionTracker(
@@ -163,13 +165,32 @@ class TradingAgent:
         logger.info(f"{'═' * 60}")
 
         try:
+            # ──── Check Macro Market Status ────
+            market_regime = await self.market_regime_analyzer.analyze()
+
+            if self.config.trading.mode == "paper":
+                equity = 300_000
+            else:
+                try:
+                    balance = await self.market_data.fetch_balance()
+                    equity = balance.get("free", {}).get("IDR", 0)
+                except Exception as e:
+                    logger.warning(f"⚠️ Error fetching balance for equity: {e}")
+                    equity = 0
+            
+            daily_target_met = self.risk_manager.check_daily_target_met(equity)
+            if daily_target_met:
+                logger.info("🎯 DAILY TARGET MET: Switching to strict / defensive mode")
+            else:
+                logger.info("🔥 DAILY TARGET NOT MET: Switching to aggressive / hunter mode")
+
             # ──── Step 1: Analyze All Trading Pairs Concurrently ────
             # To avoid overloading the exchange, we can batch them.
             # But ccxt async_support handles internal connection pooling and rate limiting if enabled.
             # For 100+ pairs, we should probably chunk them. But assuming ~30 liquid pairs, gather is fine.
             tasks = []
             for symbol in self.config.trading.pairs:
-                tasks.append(self._analyze_pair(symbol))
+                tasks.append(self._analyze_pair(symbol, daily_target_met, market_regime, equity))
                 
             results = await asyncio.gather(*tasks, return_exceptions=True)
             for symbol, res in zip(self.config.trading.pairs, results):
@@ -185,7 +206,7 @@ class TradingAgent:
         except Exception as e:
             logger.error(f"❌ Fatal error in analysis cycle: {e}")
 
-    async def _analyze_pair(self, symbol: str):
+    async def _analyze_pair(self, symbol: str, daily_target_met: bool, market_regime: str, equity: float):
         """Analyze a single trading pair and execute if signal is strong."""
         logger.info(f"\n{'─' * 40}")
         logger.info(f"📊 Analyzing: {symbol}")
@@ -234,7 +255,7 @@ class TradingAgent:
         
         # ──── Generate Combined Signal (Multi-TF) ────
         trading_signal = self.signal_generator.generate_multi_timeframe(
-            tech_signals, volume_signal, sentiment_signal
+            tech_signals, volume_signal, sentiment_signal, daily_target_met, market_regime
         )
 
         # Save signal to database
@@ -252,7 +273,7 @@ class TradingAgent:
         logger.info(f"   Reason: {trading_signal.reason}")
 
         # ──── Execute Trading Decision ────
-        await self._execute_signal(symbol, trading_signal, tech_signals, signal_id)
+        await self._execute_signal(symbol, trading_signal, tech_signals, signal_id, daily_target_met, market_regime, equity)
 
     async def _execute_signal(
         self,
@@ -260,6 +281,9 @@ class TradingAgent:
         signal: TradingSignal,
         tech_signals: dict,
         signal_id: int,
+        daily_target_met: bool,
+        market_regime: str,
+        equity: float,
     ):
         """Execute trading decision based on signal."""
 
@@ -310,16 +334,6 @@ class TradingAgent:
             logger.warning(f"⚠️ ATR is zero for {symbol} — cannot calculate stop loss")
             return
 
-        # Get equity
-        if self.config.trading.mode == "paper":
-            equity = 300_000
-        else:
-            try:
-                balance = await self.market_data.fetch_balance()
-                equity = balance.get("free", {}).get("IDR", 0)
-            except Exception:
-                equity = 0
-
         # Calculate order with risk management
         order_plan = self.risk_manager.calculate_order(
             symbol=symbol,
@@ -327,6 +341,8 @@ class TradingAgent:
             entry_price=entry_price,
             atr=atr,
             equity=equity,
+            market_regime=market_regime,
+            daily_target_met=daily_target_met,
         )
 
         if not order_plan.approved:

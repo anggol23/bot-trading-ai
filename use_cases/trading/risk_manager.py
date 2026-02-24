@@ -41,6 +41,8 @@ class RiskManager:
         entry_price: float,
         atr: float,
         equity: float,
+        market_regime: str = "NORMAL",
+        daily_target_met: bool = False,
     ) -> OrderPlan:
         """
         Calculate position size and SL/TP based on risk rules.
@@ -60,15 +62,37 @@ class RiskManager:
         if rejection:
             return self._rejected_order(symbol, side, entry_price, rejection)
 
+        # ──── Dynamic Market Parameters ────
+        active_sl_multiplier = self.sl_multiplier
+        active_tp_rr = self.tp_rr
+        base_risk_pct = self.risk_per_trade
+
+        if market_regime == "VOLATILE":
+            active_sl_multiplier *= 1.5  # Wider Stop Loss to avoid whipsaws
+            active_tp_rr *= 0.8          # Quicker Take Profit
+            base_risk_pct *= 0.8         # Reduce exposure
+        elif market_regime == "CHOPPY":
+            active_sl_multiplier *= 0.8  # Tighter Stop Loss
+            active_tp_rr *= 1.2          # Need higher reward to justify the noise risk
+            base_risk_pct *= 0.5         # Very small exposure
+        elif market_regime in ("TRENDING_BULL", "TRENDING_BEAR"):
+            active_tp_rr *= 1.5          # Let profits run wider
+            active_sl_multiplier *= 1.2  # Slight wiggle room
+            base_risk_pct = min(self.risk_per_trade * 1.5, 0.05) # Bet larger on confirmed trends
+            
+        if daily_target_met:
+            # Protect profits -> Elite Mode -> Half exposure
+            base_risk_pct *= 0.5
+
         # ──── Calculate Stop Loss ────
-        sl_distance = atr * self.sl_multiplier
+        sl_distance = atr * active_sl_multiplier
 
         if side == "buy":
             stop_loss = entry_price - sl_distance
-            take_profit = entry_price + (sl_distance * self.tp_rr)
+            take_profit = entry_price + (sl_distance * active_tp_rr)
         else:
             stop_loss = entry_price + sl_distance
-            take_profit = entry_price - (sl_distance * self.tp_rr)
+            take_profit = entry_price - (sl_distance * active_tp_rr)
 
         # Ensure stop loss is positive
         if stop_loss <= 0:
@@ -81,11 +105,10 @@ class RiskManager:
         # Dynamically scale down risk if Pyramiding (Scale-in)
         open_trades = self.db.get_open_trades()
         symbol_trades = [t for t in open_trades if t["symbol"] == symbol]
-        
-        active_risk_pct = self.risk_per_trade
+        active_risk_pct = base_risk_pct
         if symbol_trades:
-            # Halve risk for each subsequent pyramid bullet: 2% -> 1% -> 0.5%
-            active_risk_pct = self.risk_per_trade / (2 ** len(symbol_trades))
+            # Halve risk for each subsequent pyramid bullet: base -> base/2 -> base/4
+            active_risk_pct = base_risk_pct / (2 ** len(symbol_trades))
             logger.info(f"🔼 Pyramiding Entry #{len(symbol_trades)+1} for {symbol}. Scaling risk to {active_risk_pct*100:.2f}%")
 
         risk_amount = equity * active_risk_pct  # Max loss in IDR
@@ -101,13 +124,15 @@ class RiskManager:
             risk_amount = position_size * sl_distance
 
         # ──── Risk:Reward validation ────
-        reward_amount = position_size * (sl_distance * self.tp_rr)
+        reward_amount = position_size * (sl_distance * active_tp_rr)
         rr_ratio = reward_amount / risk_amount if risk_amount > 0 else 0
 
-        if rr_ratio < 1.5:
+        # Validate against configured TP RR, allowing a slight float margin
+        min_rr = min(1.0, active_tp_rr * 0.95)
+        if rr_ratio < min_rr:
             return self._rejected_order(
                 symbol, side, entry_price,
-                f"R:R terlalu rendah: {rr_ratio:.2f} (minimum 1.5)"
+                f"R:R terlalu rendah: {rr_ratio:.2f} (configure TP RR: {active_tp_rr:.2f})"
             )
 
         plan = OrderPlan(
@@ -183,6 +208,19 @@ class RiskManager:
             )
 
         return None  # All checks passed
+
+    def check_daily_target_met(self, equity: float) -> bool:
+        """
+        Check if the accumulated realized profit today has met the daily target.
+        """
+        today_trades = self.db.get_trades_today()
+        realized_pnl = sum(
+            t.get("pnl", 0) for t in today_trades
+            if t.get("pnl") is not None
+        )
+        
+        target_profit_idr = equity * self.config.risk.daily_target_profit_pct
+        return realized_pnl >= target_profit_idr
 
     def _rejected_order(
         self, symbol: str, side: str, price: float, reason: str
