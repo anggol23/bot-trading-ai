@@ -52,13 +52,16 @@ BERITA TERBARU:
 
 INSTRUKSI:
 1. Analisis apakah sinyal teknis ini valid atau hanya "noise" pasar.
-2. Perhatikan korelasi antara trend teknis, anomali volume whale, dan sentimen berita.
-3. Berikan keputusan akhir: APPROVE, REJECT, atau WAIT (menunggu konfirmasi).
+2. FILTRASI BIAYA (FEES): Indodax memiliki Taker Fee ~0.51% per transaksi. Total biaya beli-jual adalah ~1.1%. 
+3. PROFIT HURDLE: Tolak (REJECT) setiap sinyal yang potensi profitnya (Take Profit) terlihat "tipis" atau di bawah 2% untuk memastikan net profit yang sehat setelah dipotong biaya.
+4. ORDERBOOK GUARD: Perhatikan komposisi antrian (jika rasio Bids/Asks tersedia di Data Pasar). Hati-hati dengan tembok harga palsu (Spoofing).
+5. Perhatikan korelasi antara trend teknis, anomali volume whale, dan sentimen berita.
+6. Berikan keputusan akhir: APPROVE, REJECT, atau WAIT (menunggu konfirmasi).
 
 FORMAT JAWABAN (WAJIB JSON):
 {{
   "decision": "APPROVE" | "REJECT" | "WAIT",
-  "reasoning": "Penjelasan singkat dalam Bahasa Indonesia mengapa Anda mengambil keputusan tersebut."
+  "reasoning": "Penjelasan singkat dalam Bahasa Indonesia mengapa Anda mengambil keputusan tersebut (Sebutkan faktor profit vs fees jika relevan)."
 }}
 """
 

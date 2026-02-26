@@ -33,6 +33,7 @@ from use_cases.trading.position_tracker import PositionTracker
 from infrastructure.news.cryptopanic_client import CryptoPanicClient
 from infrastructure.ai.llm_client import GeminiClient
 from use_cases.analysis.llm_strategist import LLMStrategist
+from infrastructure.notifications.telegram_bot import TelegramBot
 from utils.logger import setup_logging, get_logger
 from utils.dashboard import Dashboard, print_startup_banner
 
@@ -70,6 +71,7 @@ class TradingAgent:
             self.volume_analyzer
         )
         self.dashboard = Dashboard()
+        self.telegram = TelegramBot(config.telegram)
 
         # AI Analyst (LLM)
         self.gemini_client = GeminiClient(
@@ -113,6 +115,15 @@ class TradingAgent:
 
         self.running = True
         logger.info("🚀 AI Trading Agent started!")
+        
+        # Telegram Setup
+        self.telegram.register_stop_callback(self._telegram_stop_callback)
+        asyncio.create_task(self.telegram.start_listening())
+        await self.telegram.send_message(
+            f"🚀 <b>AI Trading Agent Online</b>\n"
+            f"Mode: {self.config.trading.mode.upper()}\n"
+            f"Pairs: {len(self.config.trading.pairs)} active"
+        )
 
         # Run immediately on start
         await self._run_cycle()
@@ -123,29 +134,58 @@ class TradingAgent:
         
         last_analysis_time = time.time()
         last_position_check_time = time.time()
+        last_report_date = datetime.now(timezone.utc).date()
 
         logger.info(
             f"📅 Scheduled: Analysis every {self.config.trading.analysis_interval_minutes} min | "
             f"Position check every 5 min"
         )
 
-        while self.running:
-            now = time.time()
-            
-            # Position Check Loop
-            if now - last_position_check_time >= position_check_interval_sec:
-                await self._check_positions()
-                last_position_check_time = now
-                
-            # Full Analysis Cycle Loop
-            if now - last_analysis_time >= analysis_interval_sec:
-                # Refresh liquid pairs periodically (in case market shifts)
-                logger.info("📡 Running Omni-Scanner to refresh liquid pairs...")
-                self.config.trading.pairs = await self.omni_scanner.get_liquid_pairs()
-                await self._run_cycle()
-                last_analysis_time = now
+        error_count = 0
+        base_backoff_sec = 2
 
-            await asyncio.sleep(1) # Yield control back to loop avoiding CPU hog
+        while self.running:
+            try:
+                now = time.time()
+                current_date = datetime.now(timezone.utc).date()
+                
+                # Daily Report
+                if current_date > last_report_date:
+                    await self._send_daily_report()
+                    last_report_date = current_date
+                
+                # Position Check Loop
+                if now - last_position_check_time >= position_check_interval_sec:
+                    await self._check_positions()
+                    last_position_check_time = now
+                    
+                # Full Analysis Cycle Loop
+                if now - last_analysis_time >= analysis_interval_sec:
+                    # Refresh liquid pairs periodically (in case market shifts)
+                    logger.info("📡 Running Omni-Scanner to refresh liquid pairs...")
+                    self.config.trading.pairs = await self.omni_scanner.get_liquid_pairs()
+                    await self._run_cycle()
+                    last_analysis_time = now
+
+                # Reset error count on successful loop iteration
+                if error_count > 0:
+                    logger.info("✅ Connection restored, resuming normal operations.")
+                    error_count = 0
+
+                await asyncio.sleep(1) # Yield control back to loop avoiding CPU hog
+                
+            except __import__('ccxt').NetworkError as e:
+                error_count += 1
+                backoff = min(base_backoff_sec ** error_count, 300) # Max 5 minutes backoff
+                logger.error(f"🌐 🔌 API Connection lost: {e}")
+                logger.info(f"⏳ Circuit Breaker Active: Retrying in {backoff} seconds... (Attempt {error_count})")
+                await asyncio.sleep(backoff)
+            except Exception as e:
+                error_count += 1
+                backoff = min(base_backoff_sec ** error_count, 300)
+                logger.error(f"❌ Unexpected Error in Main Loop: {e}")
+                logger.info(f"⏳ Circuit Breaker Active: Retrying in {backoff} seconds... (Attempt {error_count})")
+                await asyncio.sleep(backoff)
 
         # Saat self.running = False (Signal handler triggered), jalankan cleanup
         await self._cleanup()
@@ -154,6 +194,8 @@ class TradingAgent:
         """Clean up active connections gracefully before exiting."""
         logger.info("\n🧹 Membersihkan sesi dan koneksi asinkron...")
         try:
+            await self.telegram.send_message("🛑 <b>Bot Offline</b>\nMemulai proses shutdown...")
+            await self.telegram.close()
             if hasattr(self, 'market_data') and hasattr(self.market_data, 'close'):
                 await self.market_data.close()
             if hasattr(self, 'news_client') and hasattr(self.news_client, 'close'):
@@ -274,10 +316,29 @@ class TradingAgent:
             logger.info(f"🤖 Calling LLM Strategist ({self.config.ai.model_name}) for {symbol}...")
             
             # Prepare contextual data for LLM
+            
+            # Fetch orderbook for depth analysis
+            orderbook_ratio = "N/A"
+            try:
+                ob = await self.market_data.fetch_order_book(symbol, limit=20)
+                bids_vol = sum(amount for price, amount in ob.get('bids', []))
+                asks_vol = sum(amount for price, amount in ob.get('asks', []))
+                if asks_vol > 0:
+                    ratio = bids_vol / asks_vol
+                    if ratio > 2.0:
+                        orderbook_ratio = f"{ratio:.2f} (Bids > Asks, Strong Buying Pressure or Spoofing)"
+                    elif ratio < 0.5:
+                        orderbook_ratio = f"{ratio:.2f} (Asks > Bids, Heavy Selling Wall)"
+                    else:
+                        orderbook_ratio = f"{ratio:.2f} (Balanced)"
+            except Exception as e:
+                logger.warning(f"⚠️ Could not fetch orderbook for LLM Context: {e}")
+            
             market_stats = {
                 "technical": {tf: s.trend for tf, s in tech_signals.items()},
                 "volume": volume_signal.to_dict(),
-                "sentiment": sentiment_signal.get("status", "NEUTRAL")
+                "sentiment": sentiment_signal.get("status", "NEUTRAL"),
+                "orderbook_ratio": orderbook_ratio
             }
             headlines = "\n".join(sentiment_signal.get("headlines", []))
             
@@ -294,6 +355,10 @@ class TradingAgent:
             if trading_signal.ai_decision == "REJECT":
                 trading_signal.action = "HOLD"
                 trading_signal.reason += f" | ❌ AI REJECTED: {trading_signal.ai_reasoning}"
+                await self.telegram.send_message(
+                    f"🚫 <b>LLM VETO: {symbol}</b>\n"
+                    f"Sinyal Ditolak karena: {trading_signal.ai_reasoning}"
+                )
             elif trading_signal.ai_decision == "WAIT":
                 trading_signal.action = "HOLD"
                 trading_signal.reason += f" | ⏳ AI WAIT: {trading_signal.ai_reasoning}"
@@ -414,6 +479,15 @@ class TradingAgent:
                 f"TP: {order_plan.take_profit:,.0f} | "
                 f"Risk: {order_plan.risk_amount:,.0f} IDR"
             )
+            await self.telegram.send_message(
+                f"🟢 <b>NEW TRADE EXECUTED</b>\n"
+                f"Symbol: <b>{symbol}</b>\n"
+                f"Action: <b>{side.upper()}</b>\n"
+                f"Entry Price: Rp {order_plan.entry_price:,.0f}\n"
+                f"Target Proft: Rp {order_plan.take_profit:,.0f}\n"
+                f"Stop Loss: Rp {order_plan.stop_loss:,.0f}\n"
+                f"Alasan: {signal.reason}"
+            )
 
     async def _check_positions(self):
         """Check open positions for SL/TP hits."""
@@ -423,6 +497,8 @@ class TradingAgent:
             if actions:
                 for action in actions:
                     logger.trade(f"⚡ Position update: {action}")
+                    if "Closed" in action:
+                        await self.telegram.send_message(f"🔔 <b>POSITION CLOSED</b>\n{action}")
         except Exception as e:
             logger.error(f"❌ Error checking positions: {e}")
 
@@ -438,6 +514,29 @@ class TradingAgent:
         except Exception as e:
             logger.warning(f"⚠️ Dashboard display error: {e}")
 
+    def _telegram_stop_callback(self):
+        """Callback from Telegram /stop command."""
+        logger.warning("Memanggil Shutdown dari Telegram Kill Switch...")
+        self.running = False
+        
+    async def _send_daily_report(self):
+        """Send daily portfolio summary to Telegram."""
+        try:
+            summary = await self.position_tracker.get_portfolio_summary()
+            emoji = "📈" if summary.realized_pnl_today >= 0 else "📉"
+            msg = (
+                f"📅 <b>DAILY REPORT</b>\n\n"
+                f"Equity: Rp {summary.total_equity:,.0f}\n"
+                f"Available: Rp {summary.available_balance:,.0f}\n"
+                f"Open Positions: {summary.open_positions}\n"
+                f"Unrealized PNL: Rp {summary.unrealized_pnl:,.0f}\n"
+                f"{emoji} <b>Realized Today: Rp {summary.realized_pnl_today:,.0f}</b>\n\n"
+                f"Max Drawdown: {summary.daily_drawdown_pct:.2f}%"
+            )
+            await self.telegram.send_message(msg)
+        except Exception as e:
+            logger.error(f"❌ Failed to send daily report: {e}")
+            
     def _shutdown(self, signum, frame):
         """Graceful shutdown handler."""
         logger.info("\n🛑 Sinyal Terminasi diterima (Shutting down AI Trading Agent)...")

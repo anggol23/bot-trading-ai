@@ -86,20 +86,42 @@ class PositionTracker:
                             actions.append(f"Force Closed {symbol}: {close_reason}")
                         continue
 
-                # ──── Trailing Take Profit (Peak-based) ────
+                # ──── Trailing Take Profit (Peak-based) & Drawdown Tracking ────
                 highest_price = trade.get("highest_price", trade["price"])
-                updated_highest = False
+                max_drawdown = trade.get("max_drawdown", 0.0)
+                updated_db = False
                 
-                if side == "buy" and current_price > highest_price:
-                    highest_price = current_price
-                    updated_highest = True
-                elif side == "sell" and current_price < highest_price:
-                    highest_price = current_price
-                    updated_highest = True
+                if side == "buy":
+                    if current_price > highest_price:
+                        highest_price = current_price
+                        updated_db = True
+                    # Calculate drawdown from peak
+                    current_dd = (highest_price - current_price) / highest_price if highest_price > 0 else 0
+                    if current_dd > max_drawdown:
+                        max_drawdown = current_dd
+                        updated_db = True
+                elif side == "sell":
+                    if current_price < highest_price:
+                        highest_price = current_price
+                        updated_db = True
+                    # Calculate drawdown from "peak" (which is the lowest price for shorts)
+                    current_dd = (current_price - highest_price) / highest_price if highest_price > 0 else 0
+                    if current_dd > max_drawdown:
+                        max_drawdown = current_dd
+                        updated_db = True
                 
-                if updated_highest:
-                    self.db.update_trade_highest_price(trade["id"], highest_price)
+                if updated_db:
+                    # We will reuse the update_trade_highest_price to also update max_drawdown, 
+                    # but since the DB method is fixed, let's execute a direct query here to keep it simple
+                    cursor = self.db.conn.cursor()
+                    cursor.execute(
+                        "UPDATE trades SET highest_price = ?, max_drawdown = ? WHERE id = ?",
+                        (highest_price, max_drawdown, trade["id"])
+                    )
+                    self.db.conn.commit()
+                    
                     trade["highest_price"] = highest_price # Update local dict for risk_mgr check
+                    trade["max_drawdown"] = max_drawdown
                 
                 # Check Trailing TP hit
                 close_reason = self.risk_mgr.check_trailing_tp(trade, current_price)

@@ -342,22 +342,36 @@ class RiskManager:
         highest_price = trade.get("highest_price", entry_price)
         
         activation_pct = self.config.risk.trailing_tp_activation_pct
-        callback_pct = self.config.risk.trailing_tp_callback_pct
+        base_callback_pct = self.config.risk.trailing_tp_callback_pct
         
+        profit_pct = 0.0
         if side == "buy":
             profit_pct = (current_price - entry_price) / entry_price
-            
-            # Activation check
-            if profit_pct >= activation_pct:
-                # Callback check
-                if current_price <= highest_price * (1 - callback_pct):
-                    return f"TRAILING_TP hit: Profit {(profit_pct*100):.2f}% dropped {(callback_pct*100):.1f}% from peak"
-                    
         elif side == "sell":
             profit_pct = (entry_price - current_price) / entry_price
             
-            if profit_pct >= activation_pct:
-                if current_price >= highest_price * (1 + callback_pct):
-                    return f"TRAILING_TP hit: Profit {(profit_pct*100):.2f}% dropped {(callback_pct*100):.1f}% from peak"
+        # ─── Dynamic Callback Logic (Hard Mode Optimization) ───
+        # Adjust callback based on how much profit we have
+        active_callback_pct = base_callback_pct
+        
+        if profit_pct >= activation_pct:
+            if profit_pct < 0.03:
+                # Early Stage (1.5% - 3%): Very tight callback (0.3%) 
+                # to secure BEP (1.1%) + tiny profit
+                active_callback_pct = 0.003
+            elif profit_pct < 0.05:
+                # Mid Stage (3% - 5%): Normal callback (1%)
+                active_callback_pct = base_callback_pct
+            else:
+                # Runaway Stage (>5%): Wider callback (1.5%) to let it ride
+                active_callback_pct = max(base_callback_pct, 0.015)
+                
+            # Check for trigger based on dynamic callback
+            if side == "buy":
+                if current_price <= highest_price * (1 - active_callback_pct):
+                    return f"DYNAMIC_TRAILING_TP: Profit {profit_pct*100:.2f}% dropped {active_callback_pct*100:.2f}% from peak"
+            elif side == "sell":
+                if current_price >= highest_price * (1 + active_callback_pct):
+                    return f"DYNAMIC_TRAILING_TP: Profit {profit_pct*100:.2f}% dropped {active_callback_pct*100:.2f}% from peak"
                     
         return None

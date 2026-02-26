@@ -41,13 +41,24 @@ class RiskConfig:
     enable_sentiment_veto: bool = True
 
     # Trailing Take Profit
-    trailing_tp_activation_pct: float = 0.02  # Activate trailing TP at 2% profit
-    trailing_tp_callback_pct: float = 0.01    # Drop 1% from peak to trigger TP
+    trailing_tp_activation_pct: float = 0.015 # Activate trailing TP at 1.5% profit (Hard Mode)
+    trailing_tp_callback_pct: float = 0.01    # Base callback 1% (Dynamic logic applies)
+
+    # Expert Optimizations & Resilience
+    enable_maker_only: bool = False  # If true, use limit orders to get Maker fees (0%)
+    max_slippage_pct: float = 0.002  # Maximum allowed slippage (0.2%)
 
 
 @dataclass
 class NewsConfig:
     cryptopanic_api_key: str = ""
+
+
+@dataclass
+class TelegramConfig:
+    bot_token: str = ""
+    chat_id: str = ""
+    enable_notifications: bool = False
 
 
 @dataclass
@@ -104,8 +115,10 @@ class Config:
             pyramid_profit_threshold_pct=float(os.getenv("PYRAMID_PROFIT_THRESHOLD_PCT", "5.0")),
             enable_volume_exhaustion=os.getenv("ENABLE_VOLUME_EXHAUSTION", "true").lower() == "true",
             enable_sentiment_veto=os.getenv("ENABLE_SENTIMENT_VETO", "true").lower() == "true",
-            trailing_tp_activation_pct=float(os.getenv("TRAILING_TP_ACTIVATION", "0.02")),
+            trailing_tp_activation_pct=float(os.getenv("TRAILING_TP_ACTIVATION", "0.015")),
             trailing_tp_callback_pct=float(os.getenv("TRAILING_TP_CALLBACK", "0.01")),
+            enable_maker_only=os.getenv("ENABLE_MAKER_ONLY", "false").lower() == "true",
+            max_slippage_pct=float(os.getenv("MAX_SLIPPAGE_PCT", "0.002")),
         )
 
         pairs_str = os.getenv("TRADING_PAIRS", "BTC/IDR,ETH/IDR,SOL/IDR,ADA/IDR,DOGE/IDR,XRP/IDR,PEPE/IDR")
@@ -119,6 +132,12 @@ class Config:
         self.log = LogConfig(
             level=os.getenv("LOG_LEVEL", "INFO"),
             directory=os.getenv("LOG_DIR", "logs"),
+        )
+
+        self.telegram = TelegramConfig(
+            bot_token=os.getenv("TELEGRAM_BOT_TOKEN", ""),
+            chat_id=os.getenv("TELEGRAM_CHAT_ID", ""),
+            enable_notifications=os.getenv("ENABLE_TELEGRAM", "false").lower() == "true",
         )
 
         self.ai = AIConfig(

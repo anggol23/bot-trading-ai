@@ -104,9 +104,11 @@ class SqliteRepository(IDatabase):
                 closed_at TEXT,
                 close_price REAL,
                 highest_price REAL,
+                max_drawdown REAL,
                 pnl REAL,
                 pnl_percent REAL,
                 close_reason TEXT,
+                reasoning TEXT,
                 FOREIGN KEY (signal_id) REFERENCES signals(id)
             )
         """)
@@ -224,15 +226,15 @@ class SqliteRepository(IDatabase):
             cursor.execute("""
                 INSERT INTO trades
                 (symbol, side, order_type, price, amount, cost,
-                 stop_loss, take_profit, highest_price, status, mode, signal_id, opened_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 stop_loss, take_profit, highest_price, max_drawdown, status, mode, signal_id, reasoning, opened_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 trade["symbol"], trade["side"], trade["order_type"],
                 trade["price"], trade["amount"], trade["cost"],
                 trade.get("stop_loss"), trade.get("take_profit"),
-                trade["price"], # initial highest_price is entry price
+                trade["price"], 0.0, # initial highest_price is entry price, max_drawdown is 0.0
                 trade.get("status", "open"), trade.get("mode", "paper"),
-                trade.get("signal_id"), datetime.now(timezone.utc).isoformat()
+                trade.get("signal_id"), trade.get("reasoning", ""), datetime.now(timezone.utc).isoformat()
             ))
             return cursor.lastrowid
 

@@ -98,12 +98,59 @@ class OrderExecutor(IExecutor):
 
                 # Execute market order via ccxt
                 import asyncio
-                # Use standard retry with async sleep
+                
+                # ─── Orderbook Depth Guard (Slippage Protection) ───
+                try:
+                    order_book = await self.market.fetch_order_book(plan.symbol, limit=20)
+                    available_orders = order_book['asks'] if plan.side == 'buy' else order_book['bids']
+                    
+                    total_amount = 0.0
+                    total_cost = 0.0
+                    target_amount = plan.position_size
+                    
+                    for price, amount in available_orders:
+                        if total_amount + amount >= target_amount:
+                            # Fraction of the last order needed
+                            remaining = target_amount - total_amount
+                            total_cost += remaining * price
+                            total_amount = target_amount
+                            break
+                        else:
+                            total_cost += amount * price
+                            total_amount += amount
+                            
+                    if total_amount < target_amount:
+                        logger.warning(f"⚠️ Orderbook too thin for {plan.symbol}. Requested: {target_amount}, Available: {total_amount}")
+                        return None
+                        
+                    avg_fill_price = total_cost / total_amount
+                    slippage = abs(avg_fill_price - plan.entry_price) / plan.entry_price
+                    
+                    if slippage > self.config.risk.max_slippage_pct:
+                        logger.warning(f"🛑 SLIPPAGE GUARD: {plan.symbol} {plan.side.upper()} rejected. Estimated slippage {slippage*100:.2f}% > max {self.config.risk.max_slippage_pct*100:.2f}%")
+                        return None
+                        
+                    logger.info(f"🛡️ Slippage Check Passed: {plan.symbol} | Est: {slippage*100:.3f}% (Avg: {avg_fill_price:,.0f})")
+                except Exception as e:
+                    logger.error(f"⚠️ Failed to check orderbook for slippage, proceeding with caution: {e}")
+
+                # Execute order via ccxt
+                order_type = "market"
+                order_params = {}
+                
+                if self.config.risk.enable_maker_only:
+                    order_type = "limit"
+                    # For buy, use current price (or slightly below) to be a maker
+                    # For sell, use current price (or slightly above)
+                    order_params = {"postOnly": True} # Ensure it only executes as maker
+                    
                 order = await self.market.exchange.create_order(
                     symbol=plan.symbol,
-                    type="market",
+                    type=order_type,
                     side=plan.side,
                     amount=plan.position_size,
+                    price=plan.entry_price if order_type == "limit" else None,
+                    params=order_params
                 )
 
                 # Save to database
@@ -174,12 +221,21 @@ class OrderExecutor(IExecutor):
             if self.mode == "live":
                 # Execute opposite order to close
                 close_side = "sell" if side == "buy" else "buy"
+                order_type = "market"
+                order_params = {}
+                
+                if self.config.risk.enable_maker_only:
+                    order_type = "limit"
+                    order_params = {"postOnly": True}
+                
                 try:
                     await self.market.exchange.create_order(
                         symbol=symbol,
-                        type="market",
+                        type=order_type,
                         side=close_side,
                         amount=trade["amount"],
+                        price=current_price if order_type == "limit" else None,
+                        params=order_params
                     )
                 except __import__('ccxt').ExchangeError as e:
                     logger.error(f"⚠️ Exchange rejected close for {symbol}, forcing DB close to prevent Zombie Order: {e}")
