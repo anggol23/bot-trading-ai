@@ -15,9 +15,17 @@ class SqliteRepository(IDatabase):
 
     def __init__(self, db_path: str = "trading_agent.db"):
         self.db_path = db_path
-        self.conn = sqlite3.connect(db_path, check_same_thread=False)
+        # Increase timeout and use WAL mode for better concurrency
+        self.conn = sqlite3.connect(db_path, check_same_thread=False, timeout=30)
         self.conn.row_factory = sqlite3.Row
+        self._enable_wal_mode()
         self._create_tables()
+
+    def _enable_wal_mode(self):
+        """Enable Write-Ahead Logging for better concurrency."""
+        with self.conn:
+            self.conn.execute("PRAGMA journal_mode=WAL")
+            self.conn.execute("PRAGMA synchronous=NORMAL")
 
     def _create_tables(self):
         """Create all required tables if they don't exist."""
@@ -95,6 +103,7 @@ class SqliteRepository(IDatabase):
                 opened_at TEXT NOT NULL,
                 closed_at TEXT,
                 close_price REAL,
+                highest_price REAL,
                 pnl REAL,
                 pnl_percent REAL,
                 close_reason TEXT,
@@ -215,12 +224,13 @@ class SqliteRepository(IDatabase):
             cursor.execute("""
                 INSERT INTO trades
                 (symbol, side, order_type, price, amount, cost,
-                 stop_loss, take_profit, status, mode, signal_id, opened_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 stop_loss, take_profit, highest_price, status, mode, signal_id, opened_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 trade["symbol"], trade["side"], trade["order_type"],
                 trade["price"], trade["amount"], trade["cost"],
                 trade.get("stop_loss"), trade.get("take_profit"),
+                trade["price"], # initial highest_price is entry price
                 trade.get("status", "open"), trade.get("mode", "paper"),
                 trade.get("signal_id"), datetime.now(timezone.utc).isoformat()
             ))
@@ -258,6 +268,15 @@ class SqliteRepository(IDatabase):
         else:
             cursor.execute("SELECT * FROM trades WHERE status = 'open'")
         return [dict(r) for r in cursor.fetchall()]
+
+    def update_trade_highest_price(self, trade_id: int, highest_price: float):
+        """Update the highest price recorded for an open trade."""
+        with self.conn:
+            cursor = self.conn.cursor()
+            cursor.execute("""
+                UPDATE trades SET highest_price = ?
+                WHERE id = ?
+            """, (highest_price, trade_id))
 
     def get_trades_today(self) -> List[Dict]:
         """Get all trades opened today (for drawdown calculation)."""

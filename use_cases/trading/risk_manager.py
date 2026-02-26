@@ -321,3 +321,43 @@ class RiskManager:
                     return round(new_sl, 2)
 
         return None
+
+    def check_trailing_tp(
+        self,
+        trade: Dict,
+        current_price: float,
+    ) -> Optional[str]:
+        """
+        Check if Trailing Take Profit should be triggered.
+        
+        Logic:
+        1. Only activate if profit exceeds trailing_tp_activation_pct.
+        2. If active, trigger TP if current_price drops trailing_tp_callback_pct from highest_price.
+        
+        Returns:
+        - Close reason if TP triggered, None otherwise.
+        """
+        side = trade["side"]
+        entry_price = trade["price"]
+        highest_price = trade.get("highest_price", entry_price)
+        
+        activation_pct = self.config.risk.trailing_tp_activation_pct
+        callback_pct = self.config.risk.trailing_tp_callback_pct
+        
+        if side == "buy":
+            profit_pct = (current_price - entry_price) / entry_price
+            
+            # Activation check
+            if profit_pct >= activation_pct:
+                # Callback check
+                if current_price <= highest_price * (1 - callback_pct):
+                    return f"TRAILING_TP hit: Profit {(profit_pct*100):.2f}% dropped {(callback_pct*100):.1f}% from peak"
+                    
+        elif side == "sell":
+            profit_pct = (entry_price - current_price) / entry_price
+            
+            if profit_pct >= activation_pct:
+                if current_price >= highest_price * (1 + callback_pct):
+                    return f"TRAILING_TP hit: Profit {(profit_pct*100):.2f}% dropped {(callback_pct*100):.1f}% from peak"
+                    
+        return None

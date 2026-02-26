@@ -365,9 +365,15 @@ class SignalGenerator:
         elif market_regime == "TRENDING_BULL" and primary.action in ("BUY", "STRONG_BUY"):
             primary.confidence = min(1.0, primary.confidence * 1.2)
             primary.reason += " | 🚀 STRONG BULL REGIME: Sinyal Buy dikuatkan"
-        elif market_regime == "TRENDING_BEAR" and primary.action in ("SELL", "STRONG_SELL"):
-            primary.confidence = min(1.0, primary.confidence * 1.2)
-            primary.reason += " | 🩸 STRONG BEAR REGIME: Sinyal Sell dikuatkan"
+        elif market_regime == "TRENDING_BEAR":
+            # Market Correlation Veto: Don't buy anything if BTC is crashing
+            if primary.action in ("BUY", "STRONG_BUY"):
+                primary.action = "HOLD"
+                primary.confidence *= 0.2
+                primary.reason = f"🚨 VETO KORELASI BTC: Pasar global Bearish tajam. Menghindari entry di {primary.symbol} || " + primary.reason
+            else:
+                primary.confidence = min(1.0, primary.confidence * 1.2)
+                primary.reason += " | 🩸 STRONG BEAR REGIME: Sinyal Sell dikuatkan"
 
         # Flag for AI (LLM) Audit if confidence is high and LLM is enabled
         if primary.action in ("BUY", "STRONG_BUY", "SELL", "STRONG_SELL") and primary.confidence >= 0.7:

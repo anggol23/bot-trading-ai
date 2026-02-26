@@ -40,6 +40,10 @@ class RiskConfig:
     enable_volume_exhaustion: bool = True
     enable_sentiment_veto: bool = True
 
+    # Trailing Take Profit
+    trailing_tp_activation_pct: float = 0.02  # Activate trailing TP at 2% profit
+    trailing_tp_callback_pct: float = 0.01    # Drop 1% from peak to trigger TP
+
 
 @dataclass
 class NewsConfig:
@@ -100,6 +104,8 @@ class Config:
             pyramid_profit_threshold_pct=float(os.getenv("PYRAMID_PROFIT_THRESHOLD_PCT", "5.0")),
             enable_volume_exhaustion=os.getenv("ENABLE_VOLUME_EXHAUSTION", "true").lower() == "true",
             enable_sentiment_veto=os.getenv("ENABLE_SENTIMENT_VETO", "true").lower() == "true",
+            trailing_tp_activation_pct=float(os.getenv("TRAILING_TP_ACTIVATION", "0.02")),
+            trailing_tp_callback_pct=float(os.getenv("TRAILING_TP_CALLBACK", "0.01")),
         )
 
         pairs_str = os.getenv("TRADING_PAIRS", "BTC/IDR,ETH/IDR,SOL/IDR,ADA/IDR,DOGE/IDR,XRP/IDR,PEPE/IDR")

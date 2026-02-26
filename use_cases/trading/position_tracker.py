@@ -86,10 +86,28 @@ class PositionTracker:
                             actions.append(f"Force Closed {symbol}: {close_reason}")
                         continue
 
-                # Check if should close (SL or TP hit)
-                close_reason = self.risk_mgr.should_close_position(
-                    trade, current_price
-                )
+                # ──── Trailing Take Profit (Peak-based) ────
+                highest_price = trade.get("highest_price", trade["price"])
+                updated_highest = False
+                
+                if side == "buy" and current_price > highest_price:
+                    highest_price = current_price
+                    updated_highest = True
+                elif side == "sell" and current_price < highest_price:
+                    highest_price = current_price
+                    updated_highest = True
+                
+                if updated_highest:
+                    self.db.update_trade_highest_price(trade["id"], highest_price)
+                    trade["highest_price"] = highest_price # Update local dict for risk_mgr check
+                
+                # Check Trailing TP hit
+                close_reason = self.risk_mgr.check_trailing_tp(trade, current_price)
+                if not close_reason:
+                    # Check if should close (Standard SL or TP hit)
+                    close_reason = self.risk_mgr.should_close_position(
+                        trade, current_price
+                    )
 
                 if close_reason:
                     success = await self.executor.close_position(
