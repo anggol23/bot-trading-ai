@@ -223,24 +223,33 @@ class PositionTracker:
         )
 
         # Equity calculation
+        total_idr = 0
+        free_idr = 0
+
         if equity is None:
             if self.config.trading.mode == "paper":
                 # In paper trading, equity is starting balance + realized PnL
-                equity = 300_000 + realized_today
+                total_idr = 300_000 + realized_today
+                free_idr = total_idr - sum(t["cost"] for t in open_trades)
             else:
                 try:
                     balance = await self.market.fetch_balance()
-                    equity = balance.get("total", {}).get("IDR", 0)
+                    total_idr = balance.get("total", {}).get("IDR", 0)
+                    free_idr = balance.get("free", {}).get("IDR", 0)
                 except Exception:
-                    equity = 0
+                    total_idr = 0
+                    free_idr = 0
+        else:
+            total_idr = equity
+            free_idr = equity - sum(t["cost"] for t in open_trades)
 
         if self._initial_equity is None:
-            self._initial_equity = equity
+            self._initial_equity = total_idr
 
         # Daily drawdown
         # The original instruction implies a property, but the context is a local calculation.
         # We'll apply the safe division logic to the existing calculation.
-        current_total_equity = equity + total_unrealized
+        current_total_equity = total_idr + total_unrealized
         if self._initial_equity == 0: # Handle initial equity being zero to prevent division by zero
             daily_dd = 0.0
         else:
@@ -251,15 +260,15 @@ class PositionTracker:
         # Save snapshot
         self.db.save_portfolio_snapshot({
             "total_equity": current_total_equity,
-            "available_balance": equity,
+            "available_balance": free_idr,
             "unrealized_pnl": total_unrealized,
             "realized_pnl_today": realized_today,
             "open_positions": len(positions),
         })
 
         return PortfolioSummary(
-            total_equity=round(equity + total_unrealized, 2),
-            available_balance=round(equity, 2),
+            total_equity=round(current_total_equity, 2),
+            available_balance=round(free_idr, 2),
             unrealized_pnl=round(total_unrealized, 2),
             realized_pnl_today=round(realized_today, 2),
             open_positions=len(positions),
