@@ -430,9 +430,17 @@ class TradingAgent:
         # Get current price and ATR
         try:
             ticker = await self.market_data.fetch_ticker(symbol)
-            entry_price = ticker["last"]
+            entry_price = ticker.get("last") or 0
         except Exception as e:
             logger.error(f"❌ Cannot get price for {symbol}: {e}")
+            return
+
+        # Guard: abort if price is still zero even after fallback
+        if entry_price <= 0:
+            logger.error(
+                f"❌ {symbol}: entry_price={entry_price} — cannot place order with zero price. "
+                f"Skipping this cycle."
+            )
             return
 
         # Get ATR from primary timeframe
@@ -440,8 +448,15 @@ class TradingAgent:
         atr = tech_signals[primary_tf].atr if primary_tf in tech_signals else 0
 
         if atr <= 0:
-            logger.warning(f"⚠️ ATR is zero for {symbol} — cannot calculate stop loss")
-            return
+            # Fallback: estimate ATR as 0.5% of entry price.
+            # This handles micro-price coins (e.g. PEPE in IDR) where float
+            # precision shrinks the raw ATR to zero despite real price movement.
+            atr_fallback = entry_price * 0.005
+            logger.warning(
+                f"⚠️ ATR is zero for {symbol} — using fallback ATR = 0.5% of price "
+                f"({atr_fallback:,.6f} IDR). Execution will proceed with conservative SL."
+            )
+            atr = atr_fallback
 
         # Calculate order with risk management
         order_plan = self.risk_manager.calculate_order(

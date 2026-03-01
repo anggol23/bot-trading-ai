@@ -140,19 +140,57 @@ class MarketDataFetcher(IMarketData):
     async def fetch_ticker(self, symbol: str) -> Dict[str, Any]:
         """
         Fetch current ticker data for a symbol.
-        
+
         Returns:
             Dict with: last, bid, ask, high, low, volume, etc.
+
+        Note:
+            Some micro-cap coins on Indodax (e.g. PEPE) return last=0 due to
+            precision/rounding in their API. We fall back to orderbook mid-price
+            when this occurs so that downstream price-dependent logic (ATR, SL/TP)
+            can proceed correctly.
         """
         await self._ensure_markets()
 
         try:
             ticker = await self.exchange.fetch_ticker(symbol)
-            logger.info(
-                f"💹 {symbol} Last: {ticker['last']:,.0f} IDR | "
-                f"Vol24h: {ticker.get('baseVolume', 0):,.4f}"
-            )
+
+            last_price = ticker.get("last") or 0
+
+            # ── Fallback: derive price from orderbook mid-price ──────────────
+            if last_price <= 0:
+                logger.warning(
+                    f"⚠️ {symbol} ticker last={last_price} — attempting orderbook fallback"
+                )
+                try:
+                    ob = await self.exchange.fetch_order_book(symbol, limit=5)
+                    best_bid = ob["bids"][0][0] if ob.get("bids") else 0
+                    best_ask = ob["asks"][0][0] if ob.get("asks") else 0
+                    if best_bid > 0 and best_ask > 0:
+                        last_price = (best_bid + best_ask) / 2
+                        ticker["last"] = last_price
+                        ticker["bid"] = best_bid
+                        ticker["ask"] = best_ask
+                        logger.info(
+                            f"✅ {symbol} price derived from orderbook mid-price: "
+                            f"{last_price:,.6f} IDR (bid={best_bid:,.6f} / ask={best_ask:,.6f})"
+                        )
+                    else:
+                        logger.error(
+                            f"❌ {symbol} orderbook fallback failed — no valid bid/ask"
+                        )
+                except Exception as ob_err:
+                    logger.error(
+                        f"❌ {symbol} orderbook fallback error: {ob_err}"
+                    )
+            else:
+                logger.info(
+                    f"💹 {symbol} Last: {last_price:,.6f} IDR | "
+                    f"Vol24h: {ticker.get('baseVolume', 0):,.4f}"
+                )
+
             return ticker
+
         except Exception as e:
             logger.error(f"❌ Failed to fetch ticker for {symbol}: {e}")
             raise
