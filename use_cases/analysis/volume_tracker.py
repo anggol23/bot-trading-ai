@@ -70,8 +70,11 @@ class VolumeTracker:
                 # Calculate Z-Score for this specific trade
                 z_score = (cost_usd - mean_vol) / std_vol
                 
-                # Must break historical variance (Z-Score) AND meet absolute minimums
-                if z_score >= z_threshold and cost_usd >= min_usd:
+                # USER RULE: Must have >3x volume spike
+                volume_multiplier = cost_usd / mean_vol if mean_vol > 0 else 0
+                
+                # Must break historical variance (Z-Score) AND meet absolute minimums AND be >3x avg
+                if z_score >= z_threshold and cost_usd >= min_usd and volume_multiplier >= 3.0:
                     event = {
                         "symbol": symbol,
                         "anomaly_type": "trade_spike",

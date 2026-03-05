@@ -85,17 +85,42 @@ class VolumeAnalyzer:
         # Confidence is a blend of how much volume we saw and how one-sided it was
         confidence = (volume_factor * 0.4) + (imbalance_factor * 0.6)
         
+        # Calculate Whale Score (1-10)
+        whale_score = max(1, min(10, int(confidence * 10))) if total_usd > 0 else 0
+        
+        # Build Indonesian Whale Reason
+        flow_text = "Tekanan Beli (Net Inflow)" if net_flow == "ACCUMULATING" else ("Tekanan Jual (Net Outflow)" if net_flow == "DISTRIBUTING" else "Netral")
+        
+        # Find dominant anomaly for description
+        walls = [a for a in valid_anomalies if a['anomaly_type'] == 'orderbook_wall']
+        trades = [a for a in valid_anomalies if a['anomaly_type'] == 'trade_spike']
+        
+        largest_wall = max(walls, key=lambda x: x['amount_usd']) if walls else None
+        largest_trade = max(trades, key=lambda x: x['amount_usd']) if trades else None
+        
+        reason_parts = [f"Terdeteksi {flow_text}."]
+        if largest_wall and largest_wall['amount_usd'] > min_usd * 2:
+            w_side = "buy" if largest_wall['side'] == 'buy' else "sell"
+            reason_parts.append(f"Terdapat {w_side} wall raksasa senilai ${largest_wall['amount_usd']:,.0f} di level Rp {largest_wall['price']:,.0f}.")
+        if largest_trade and largest_trade['amount_usd'] > min_usd:
+            t_side = "pembelian" if largest_trade['side'] == 'buy' else "penjualan"
+            reason_parts.append(f"Terdapat lonjakan {t_side} >3x rata-rata senilai ${largest_trade['amount_usd']:,.0f}.")
+            
+        whale_reason = " ".join(reason_parts)
+        
         signal = VolumeSignal(
             symbol=symbol,
             net_flow=net_flow,
             intensity=intensity,
             imbalance_score=round(imbalance_score, 3),
-            confidence=round(confidence, 2)
+            confidence=round(confidence, 2),
+            whale_score=whale_score,
+            whale_reason=whale_reason
         )
         
         logger.info(
             f"📊 {symbol} Volume Anomaly → {net_flow} ({intensity}) | "
-            f"Imbalance: {imbalance_score:+.2f} | Conf: {confidence:.0%}"
+            f"Imbalance: {imbalance_score:+.2f} | Conf: {confidence:.0%} | Whale: {whale_score}/10"
         )
         
         return signal

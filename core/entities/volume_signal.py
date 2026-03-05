@@ -9,6 +9,8 @@ class VolumeSignal:
     intensity: str        # HIGH, MEDIUM, LOW
     imbalance_score: float # -1.0 to +1.0 (negative = sell bias, positive = buy bias)
     confidence: float     # 0.0 - 1.0
+    whale_score: int = 0  # 1 to 10
+    whale_reason: str = ""
 
     def to_dict(self):
         return {
@@ -17,4 +19,6 @@ class VolumeSignal:
             "intensity": self.intensity,
             "imbalance_score": self.imbalance_score,
             "confidence": self.confidence,
+            "whale_score": self.whale_score,
+            "whale_reason": self.whale_reason,
         }

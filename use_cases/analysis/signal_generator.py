@@ -150,15 +150,17 @@ class SignalGenerator:
             if combined_conf >= self.STRONG_THRESHOLD and tech.momentum == "STRONG":
                 action = "STRONG_BUY"
                 reason = (
-                    f"✅ STRONG BUY: Trend {tech.trend} ({tech.momentum}) + "
+                    f"✅ STRONG BUY (Whale Confidence: {volume.whale_score}/10): Trend {tech.trend} ({tech.momentum}) + "
                     f"Volume {volume.net_flow} ({volume.intensity}) | "
-                    f"RSI: {tech.rsi:.1f} | Imbalance: {volume.imbalance_score:+.3f}"
+                    f"RSI: {tech.rsi:.1f} | Imbalance: {volume.imbalance_score:+.3f}. "
+                    f"{volume.whale_reason}"
                 )
             else:
                 action = "BUY"
                 reason = (
-                    f"🟢 BUY: Trend {tech.trend} + Volume {volume.net_flow} | "
-                    f"RSI: {tech.rsi:.1f} | Imbalance: {volume.imbalance_score:+.3f}"
+                    f"🟢 BUY (Whale Confidence: {volume.whale_score}/10): Trend {tech.trend} + Volume {volume.net_flow} | "
+                    f"RSI: {tech.rsi:.1f} | Imbalance: {volume.imbalance_score:+.3f}. "
+                    f"{volume.whale_reason}"
                 )
 
             return TradingSignal(
@@ -177,15 +179,17 @@ class SignalGenerator:
             if combined_conf >= self.STRONG_THRESHOLD and tech.momentum == "STRONG":
                 action = "STRONG_SELL"
                 reason = (
-                    f"🔴 STRONG SELL: Trend {tech.trend} ({tech.momentum}) + "
+                    f"🔴 STRONG SELL (Whale Confidence: {volume.whale_score}/10): Trend {tech.trend} ({tech.momentum}) + "
                     f"Volume {volume.net_flow} ({volume.intensity}) | "
-                    f"RSI: {tech.rsi:.1f} | Imbalance: {volume.imbalance_score:+.3f}"
+                    f"RSI: {tech.rsi:.1f} | Imbalance: {volume.imbalance_score:+.3f}. "
+                    f"{volume.whale_reason}"
                 )
             else:
                 action = "SELL"
                 reason = (
-                    f"🟥 SELL: Trend {tech.trend} + Volume {volume.net_flow} | "
-                    f"RSI: {tech.rsi:.1f} | Imbalance: {volume.imbalance_score:+.3f}"
+                    f"🟥 SELL (Whale Confidence: {volume.whale_score}/10): Trend {tech.trend} + Volume {volume.net_flow} | "
+                    f"RSI: {tech.rsi:.1f} | Imbalance: {volume.imbalance_score:+.3f}. "
+                    f"{volume.whale_reason}"
                 )
 
             return TradingSignal(
@@ -245,7 +249,7 @@ class SignalGenerator:
                     symbol=symbol,
                     action="HOLD",
                     confidence=round(tech.confidence * 0.3, 2),
-                    reason=f"⚠️ VETO (USER RULE): Teknis {tech.trend} murni tanpa konfirmasi Volume Whale → HOLD",
+                    reason=f"⚠️ VETO (USER RULE): Teknis {tech.trend} murni tanpa konfirmasi Volume Whale (Whale Confidence: 0/10) → HOLD. Sinyal teknikal diabaikan.",
                     technical=tech,
                     volume=volume,
                 )
@@ -254,7 +258,7 @@ class SignalGenerator:
                     symbol=symbol,
                     action="HOLD",
                     confidence=round(tech.confidence * 0.3, 2),
-                    reason=f"⚠️ VETO (USER RULE): Teknis {tech.trend} murni tanpa konfirmasi Volume Whale → HOLD",
+                    reason=f"⚠️ VETO (USER RULE): Teknis {tech.trend} murni tanpa konfirmasi Volume Whale (Whale Confidence: 0/10) → HOLD. Sinyal teknikal diabaikan.",
                     technical=tech,
                     volume=volume,
                 )
