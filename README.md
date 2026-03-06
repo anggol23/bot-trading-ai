@@ -69,6 +69,7 @@ Agent membutuhkan beberapa kata sandi dan API Key agar dapat berkomunikasi denga
 2. Buka file `.env` dan isi data-data krusial:
 
 ```env
+# ===== Main Setup =====
 # Mode Trading: "paper" (Uji Coba Uang Palsu) atau "live" (Pakai Uang Asli Indodax)
 TRADING_MODE="paper"
 
@@ -76,13 +77,37 @@ TRADING_MODE="paper"
 INDODAX_API_KEY="kunci_api_indodax_anda"
 INDODAX_SECRET="kunci_rahasia_indodax_anda"
 
-# Kunci NLP News (Opsional, tapi penting untuk VETO)
-# Daftar gratis di: https://cryptopanic.com/developers/api/
-CRYPTOPANIC_API_KEY="kunci_cryptopanic_anda"
+# ===== Trading & Risk Configuration =====
+TRADING_PAIRS="BTC/IDR,ETH/IDR,SOL/IDR,ADA/IDR,DOGE/IDR"
+TIMEFRAME="15m"                           # Timeframe indikator (15m, 1h, 4h, dll)
+ANALYSIS_INTERVAL_MINUTES=5               # Interval siklus pemindaian pasar
 
-# Pengaturan Resiko Dasar (Dalam format desimal, 0.02 = 2%)
-RISK_PER_TRADE=0.02
-TRADING_PAIRS="BTC/IDR,ETH/IDR,SOL/IDR,XRP/IDR"
+RISK_PER_TRADE=0.02                       # Risiko per perdagangan (0.02 = 2% modal)
+MAX_OPEN_POSITIONS=3                      # Maksimal order paralel
+DAILY_DRAWDOWN_LIMIT=0.05                 # Batas kerugian mati harian (5%)
+PUNISHMENT_DRAWDOWN_PCT=0.02              # Batas kerugian hingga modal AI dipotong setengah
+DAILY_TARGET_PROFIT=0.01                  # Target profit harian (1%)
+STOP_LOSS_ATR_MULTIPLIER=2.0              # Jarak rentang Stop Loss dari volatilitas
+
+# ===== Trailing Take Profit =====
+TRAILING_TP_ACTIVATION=0.015              # Trailing nyala jika profit tembus 1.5%
+TRAILING_TP_CALLBACK=0.01                 # Harga turun 1% = ambil profit
+
+# ===== Volume Tracker & NLP =====
+VOLUME_ANOMALY_MULTIPLIER=3.0             # Syarat paus: Volume 3x rata-rata
+VOLUME_ANOMALY_MIN_USD_VALUE=5000         # Filter minimal US$ 5000 per transaksi paus
+CRYPTOPANIC_API_KEY="kunci_cryptopanic"   # Akses API sentimen berita Fundamental
+
+# ===== AI LLM Strategist (Gemini) =====
+ENABLE_LLM_AUDIT=true                     # Aktifkan validasi akal sehat oleh LLM
+GEMINI_API_KEY="kunci_gemini_anda"
+GEMINI_MODEL="gemini-1.5-flash"
+
+# ===== Notifikasi & Logging =====
+ENABLE_TELEGRAM=false
+TELEGRAM_BOT_TOKEN="token_bot_anda"
+TELEGRAM_CHAT_ID="id_chat_anda"
+LOG_LEVEL="INFO"
 ```
 
 _(Catatan: Biarkan mode tetap `"paper"` untuk menguji algoritma)_.
