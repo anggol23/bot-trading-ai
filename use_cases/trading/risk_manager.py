@@ -80,7 +80,22 @@ class RiskManager:
             active_sl_multiplier *= 1.2  # Slight wiggle room
             base_risk_pct = min(self.risk_per_trade * 1.5, 0.05) # Bet larger on confirmed trends
             
-        if daily_target_met:
+        # ──── Punishments & Forced Target ────
+        today_trades = self.db.get_trades_today()
+        realized_loss = sum(
+            t.get("pnl", 0) for t in today_trades
+            if t.get("pnl") is not None and t.get("pnl") < 0
+        )
+        
+        punishment_limit_idr = equity * self.config.risk.punishment_drawdown_pct
+        if abs(realized_loss) >= punishment_limit_idr:
+            logger.warning(f"⚠️ PUNISHMENT ACTIVE: Loss harian >= {self.config.risk.punishment_drawdown_pct*100}%. Buying power dipotong setengah.")
+            base_risk_pct *= 0.5
+
+        if not daily_target_met:
+            # Pemasaksaan Profit: Jika belum capai target, lebarkan SL 25% agar posisi tahan 'whipsaw' / tidak rentan tersentuh
+            active_sl_multiplier *= 1.25
+        else:
             # Protect profits -> Elite Mode -> Half exposure
             base_risk_pct *= 0.5
 

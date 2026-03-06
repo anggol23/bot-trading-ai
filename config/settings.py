@@ -32,8 +32,9 @@ class RiskConfig:
     risk_per_trade: float = 0.02          # 2% max per position
     max_open_positions: int = 3
     daily_drawdown_limit: float = 0.05    # 5% daily max drawdown
+    punishment_drawdown_pct: float = 0.02 # 2% daily loss triggers punishment (halved risk)
     daily_target_profit_pct: float = 0.01  # 1% daily target profit minimum
-    stop_loss_atr_multiplier: float = 1.5
+    stop_loss_atr_multiplier: float = 2.0  # Increased from 1.5 to 2.0 to give trade more breathing room
     take_profit_rr_ratio: float = 2.0     # Risk:Reward = 1:2
     enable_pyramiding: bool = True
     pyramid_profit_threshold_pct: float = 5.0
@@ -108,8 +109,9 @@ class Config:
             risk_per_trade=float(os.getenv("RISK_PER_TRADE", "0.02")),
             max_open_positions=int(os.getenv("MAX_OPEN_POSITIONS", "3")),
             daily_drawdown_limit=float(os.getenv("DAILY_DRAWDOWN_LIMIT", "0.05")),
+            punishment_drawdown_pct=float(os.getenv("PUNISHMENT_DRAWDOWN_PCT", "0.02")),
             daily_target_profit_pct=float(os.getenv("DAILY_TARGET_PROFIT", "0.01")),
-            stop_loss_atr_multiplier=float(os.getenv("STOP_LOSS_ATR_MULTIPLIER", "1.5")),
+            stop_loss_atr_multiplier=float(os.getenv("STOP_LOSS_ATR_MULTIPLIER", "2.0")),
             take_profit_rr_ratio=float(os.getenv("TAKE_PROFIT_RR_RATIO", "2.0")),
             enable_pyramiding=os.getenv("ENABLE_PYRAMIDING", "true").lower() == "true",
             pyramid_profit_threshold_pct=float(os.getenv("PYRAMID_PROFIT_THRESHOLD_PCT", "5.0")),
