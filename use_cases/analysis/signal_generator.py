@@ -201,28 +201,16 @@ class SignalGenerator:
                 volume=volume,
             )
 
-        # NEUTRAL trend + volume signal → mild signal
-        if tech and tech.trend == "NEUTRAL" and volume.net_flow == "ACCUMULATING":
+        # NEUTRAL trend → always HOLD (wait for clear direction)
+        if tech and tech.trend == "NEUTRAL":
             return TradingSignal(
                 symbol=symbol,
-                action="BUY",
-                confidence=round(volume.confidence * 0.6, 2),
+                action="HOLD",
+                confidence=0.1,
                 reason=(
-                    f"📊 Trend NEUTRAL + Terjadi AKUMULASI | "
-                    f"Volume kuat mengambil alih. Imbalance: {volume.imbalance_score:+.3f}"
-                ),
-                technical=tech,
-                volume=volume,
-            )
-
-        if tech and tech.trend == "NEUTRAL" and volume.net_flow == "DISTRIBUTING":
-            return TradingSignal(
-                symbol=symbol,
-                action="SELL",
-                confidence=round(volume.confidence * 0.6, 2),
-                reason=(
-                    f"📊 Trend NEUTRAL + Terjadi DISTRIBUSI | "
-                    f"Waspada potensi penurunan. Imbalance: {volume.imbalance_score:+.3f}"
+                    f"📊 Trend NEUTRAL — Menunggu arah yang jelas | "
+                    f"Volume: {volume.net_flow} ({volume.intensity}) | "
+                    f"Imbalance: {volume.imbalance_score:+.3f}"
                 ),
                 technical=tech,
                 volume=volume,

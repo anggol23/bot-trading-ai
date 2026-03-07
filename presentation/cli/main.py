@@ -10,11 +10,15 @@ Strategy:
 """
 
 import sys
+import os
 import time
 import asyncio
 import signal
 import argparse
 from datetime import datetime, timezone
+
+# Add project root to Python path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from config.settings import Config
 from infrastructure.storage.sqlite_repository import SqliteRepository as Database
