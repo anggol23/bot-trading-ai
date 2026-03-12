@@ -33,7 +33,9 @@ class RiskConfig:
     max_open_positions: int = 3
     daily_drawdown_limit: float = 0.05    # 5% daily max drawdown
     punishment_drawdown_pct: float = 0.02 # 2% daily loss triggers punishment (halved risk)
-    daily_target_profit_pct: float = 0.01  # 1% daily target profit minimum
+    daily_target_profit_pct: float = 0.01  # 1% daily target profit
+    daily_target_profit_min_idr: float = 30_000.0  # Absolute minimum target per day
+    stop_new_entries_after_target: bool = True  # Lock gains by stopping new entries once target is reached
     stop_loss_atr_multiplier: float = 2.0  # Increased from 1.5 to 2.0 to give trade more breathing room
     take_profit_rr_ratio: float = 2.0     # Risk:Reward = 1:2
     enable_pyramiding: bool = True
@@ -111,6 +113,8 @@ class Config:
             daily_drawdown_limit=float(os.getenv("DAILY_DRAWDOWN_LIMIT", "0.05")),
             punishment_drawdown_pct=float(os.getenv("PUNISHMENT_DRAWDOWN_PCT", "0.02")),
             daily_target_profit_pct=float(os.getenv("DAILY_TARGET_PROFIT", "0.01")),
+            daily_target_profit_min_idr=float(os.getenv("DAILY_TARGET_PROFIT_MIN_IDR", "30000")),
+            stop_new_entries_after_target=os.getenv("STOP_NEW_ENTRIES_AFTER_TARGET", "true").lower() == "true",
             stop_loss_atr_multiplier=float(os.getenv("STOP_LOSS_ATR_MULTIPLIER", "2.0")),
             take_profit_rr_ratio=float(os.getenv("TAKE_PROFIT_RR_RATIO", "2.0")),
             enable_pyramiding=os.getenv("ENABLE_PYRAMIDING", "true").lower() == "true",
@@ -162,6 +166,9 @@ class Config:
 
         if self.risk.risk_per_trade > 0.05:
             issues.append("WARNING: RISK_PER_TRADE > 5% — very aggressive risk level")
+
+        if self.risk.daily_target_profit_min_idr < 0:
+            issues.append("WARNING: DAILY_TARGET_PROFIT_MIN_IDR cannot be negative")
 
         if self.trading.timeframe not in ("1m", "5m", "15m", "30m", "1h", "4h", "1d"):
             issues.append(f"WARNING: Timeframe '{self.trading.timeframe}' may not be supported")

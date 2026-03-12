@@ -234,12 +234,19 @@ class TradingAgent:
                 except Exception as e:
                     logger.warning(f"⚠️ Error fetching balance for equity: {e}")
                     equity = 0
-            
+
+            target_idr = self.risk_manager.get_daily_target_profit_idr(equity)
             daily_target_met = self.risk_manager.check_daily_target_met(equity)
             if daily_target_met:
-                logger.info("🎯 DAILY TARGET MET: Switching to strict / defensive mode")
+                logger.info(
+                    f"🎯 DAILY TARGET MET (>= Rp {target_idr:,.0f}): "
+                    "Switching to strict / defensive mode"
+                )
             else:
-                logger.info("🔥 DAILY TARGET NOT MET: Switching to aggressive / hunter mode")
+                logger.info(
+                    f"🔥 DAILY TARGET NOT MET (< Rp {target_idr:,.0f}): "
+                    "Switching to aggressive / hunter mode"
+                )
 
             # ──── Step 1: Analyze All Trading Pairs Concurrently ────
             # To avoid overloading the exchange, we can batch them.
@@ -429,6 +436,13 @@ class TradingAgent:
             side = "buy"
         else:
             logger.info(f"📊 {symbol}: HOLD — No action taken")
+            return
+
+        if daily_target_met and self.config.risk.stop_new_entries_after_target:
+            logger.info(
+                f"🛑 {symbol}: HOLD — Daily target reached, new entry disabled "
+                "(STOP_NEW_ENTRIES_AFTER_TARGET=true)"
+            )
             return
 
         # Get current price and ATR

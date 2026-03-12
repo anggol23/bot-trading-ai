@@ -280,7 +280,10 @@ def get_daily_target_status() -> DailyTargetResponse:
     equity = float(snap['total_equity']) if snap and snap['total_equity'] else 0.0
 
     target_pct = config.risk.daily_target_profit_pct * 100  # e.g. 1.0
-    target_idr = equity * config.risk.daily_target_profit_pct
+    target_idr = max(
+        equity * config.risk.daily_target_profit_pct,
+        config.risk.daily_target_profit_min_idr,
+    )
 
     drawdown_limit_pct = config.risk.daily_drawdown_limit * 100
     daily_drawdown_pct = (realized_loss / equity * 100) if equity > 0 else 0.0

@@ -48,7 +48,7 @@ class TestRiskManager:
             "BTC/IDR", "buy", entry, atr, equity
         )
 
-        expected_sl = entry - (atr * 1.5)
+        expected_sl = entry - (atr * self.config.risk.stop_loss_atr_multiplier)
         assert plan.stop_loss == pytest.approx(expected_sl, rel=0.01)
 
     def test_take_profit_rr_ratio(self):
@@ -185,3 +185,32 @@ class TestRiskManager:
         }
         reason = self.risk_mgr.should_close_position(trade, 1_510_000_000)
         assert reason is None
+
+    def test_daily_target_uses_minimum_idr(self):
+        """Daily target should be met once realized PnL reaches the minimum absolute target."""
+        self.config.risk.daily_target_profit_pct = 0.01
+        self.config.risk.daily_target_profit_min_idr = 30_000
+
+        trade_id = self.db.save_trade({
+            "symbol": "ETH/IDR",
+            "side": "buy",
+            "order_type": "market",
+            "price": 10_000_000,
+            "amount": 0.01,
+            "cost": 100_000,
+            "status": "open",
+            "mode": "paper",
+        })
+        # PnL = (13,000,000 - 10,000,000) * 0.01 = 30,000
+        self.db.close_trade(trade_id, 13_000_000, "TARGET")
+
+        assert self.risk_mgr.check_daily_target_met(300_000) is True
+
+    def test_daily_target_hybrid_prefers_higher_threshold(self):
+        """Effective daily target must be max(percent_target, min_absolute_target)."""
+        self.config.risk.daily_target_profit_pct = 0.02
+        self.config.risk.daily_target_profit_min_idr = 30_000
+
+        # 2% of 5,000,000 is 100,000, so percentage target should win.
+        target = self.risk_mgr.get_daily_target_profit_idr(5_000_000)
+        assert target == 100_000

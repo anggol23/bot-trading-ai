@@ -233,9 +233,15 @@ class RiskManager:
             t.get("pnl", 0) for t in today_trades
             if t.get("pnl") is not None
         )
-        
-        target_profit_idr = equity * self.config.risk.daily_target_profit_pct
+
+        target_profit_idr = self.get_daily_target_profit_idr(equity)
         return realized_pnl >= target_profit_idr
+
+    def get_daily_target_profit_idr(self, equity: float) -> float:
+        """Return effective daily target in IDR (max of percentage target and minimum absolute target)."""
+        pct_target = equity * self.config.risk.daily_target_profit_pct
+        min_target = self.config.risk.daily_target_profit_min_idr
+        return max(0.0, pct_target, min_target)
 
     def _rejected_order(
         self, symbol: str, side: str, price: float, reason: str

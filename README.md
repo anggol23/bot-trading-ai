@@ -86,7 +86,9 @@ RISK_PER_TRADE=0.02                       # Risiko per perdagangan (0.02 = 2% mo
 MAX_OPEN_POSITIONS=3                      # Maksimal order paralel
 DAILY_DRAWDOWN_LIMIT=0.05                 # Batas kerugian mati harian (5%)
 PUNISHMENT_DRAWDOWN_PCT=0.02              # Batas kerugian hingga modal AI dipotong setengah
-DAILY_TARGET_PROFIT=0.01                  # Target profit harian (1%)
+DAILY_TARGET_PROFIT=0.01                  # Target profit harian berbasis persen ekuitas
+DAILY_TARGET_PROFIT_MIN_IDR=30000         # Target profit harian minimum absolut (Rp)
+STOP_NEW_ENTRIES_AFTER_TARGET=true        # Kunci profit: stop entry baru setelah target tercapai
 STOP_LOSS_ATR_MULTIPLIER=2.0              # Jarak rentang Stop Loss dari volatilitas
 
 # ===== Trailing Take Profit =====
