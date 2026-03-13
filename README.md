@@ -89,6 +89,9 @@ PUNISHMENT_DRAWDOWN_PCT=0.02              # Batas kerugian hingga modal AI dipot
 DAILY_TARGET_PROFIT=0.01                  # Target profit harian berbasis persen ekuitas
 DAILY_TARGET_PROFIT_MIN_IDR=30000         # Target profit harian minimum absolut (Rp)
 STOP_NEW_ENTRIES_AFTER_TARGET=true        # Kunci profit: stop entry baru setelah target tercapai
+MIN_ENTRY_CONFIDENCE=0.62                 # Confidence minimum untuk entry normal (trade ke-2 dst)
+FIRST_TRADE_MIN_CONFIDENCE=0.50           # Confidence minimum khusus trade pertama harian
+MAX_TRADES_PER_DAY=4                      # Batas jumlah trade per hari untuk mencegah overtrading
 STOP_LOSS_ATR_MULTIPLIER=2.0              # Jarak rentang Stop Loss dari volatilitas
 
 # ===== Trailing Take Profit =====

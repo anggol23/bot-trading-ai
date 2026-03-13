@@ -34,18 +34,43 @@ class MarketDataFetcher(IMarketData):
             exchange_params["secret"] = config.indodax.secret
 
         self.exchange = ccxt.indodax(exchange_params)
+
         self._markets_loaded = False
+        self._markets_lock = asyncio.Lock()
+        self._market_load_max_retries = 3
 
     async def _ensure_markets(self):
         """Load markets if not already loaded."""
-        if not self._markets_loaded:
-            try:
-                await self.exchange.load_markets()
-                self._markets_loaded = True
-                logger.info(f"📡 Loaded {len(self.exchange.markets)} markets from Indodax")
-            except Exception as e:
-                logger.error(f"❌ Failed to load markets: {e}")
-                raise
+        if self._markets_loaded:
+            return
+
+        # Avoid race condition: many async tasks can call _ensure_markets at once.
+        async with self._markets_lock:
+            if self._markets_loaded:
+                return
+
+            last_error = None
+            for attempt in range(1, self._market_load_max_retries + 1):
+                try:
+                    # Force reload only after first failure to refresh stale state.
+                    await self.exchange.load_markets(reload=(attempt > 1))
+                    self._markets_loaded = True
+                    logger.info(f"📡 Loaded {len(self.exchange.markets)} markets from Indodax")
+                    return
+                except Exception as e:
+                    last_error = e
+                    if attempt < self._market_load_max_retries:
+                        backoff_sec = min(2 ** attempt, 8)
+                        logger.warning(
+                            f"⚠️ load_markets failed ({attempt}/{self._market_load_max_retries}): {e}. "
+                            f"Retrying in {backoff_sec}s..."
+                        )
+                        await asyncio.sleep(backoff_sec)
+
+            logger.error(
+                f"❌ Failed to load markets after {self._market_load_max_retries} attempts: {last_error}"
+            )
+            raise last_error
 
     async def fetch_ohlcv(
         self,

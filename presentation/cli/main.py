@@ -445,6 +445,28 @@ class TradingAgent:
             )
             return
 
+        # Guardrails for daily consistency: avoid weak setups and overtrading.
+        today_trades = self.db.get_trades_today()
+        trades_count_today = len(today_trades)
+        if trades_count_today >= self.config.risk.max_trades_per_day:
+            logger.info(
+                f"🧯 {symbol}: HOLD — Daily trade cap reached "
+                f"({trades_count_today}/{self.config.risk.max_trades_per_day})"
+            )
+            return
+
+        min_confidence = (
+            self.config.risk.first_trade_min_confidence
+            if trades_count_today == 0
+            else self.config.risk.min_entry_confidence
+        )
+        if signal.confidence < min_confidence:
+            logger.info(
+                f"📉 {symbol}: HOLD — Confidence too low "
+                f"({signal.confidence:.2f} < {min_confidence:.2f})"
+            )
+            return
+
         # Get current price and ATR
         try:
             ticker = await self.market_data.fetch_ticker(symbol)
