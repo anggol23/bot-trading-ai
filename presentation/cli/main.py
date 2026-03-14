@@ -212,6 +212,23 @@ class TradingAgent:
             self.db.close()
         logger.info("👋 Sesi ditutup. Bot Offline.")
 
+    def _confidence_weighted_budget(self, base_budget: float, confidence: float) -> float:
+        """Allocate larger budget slice to higher-confidence signals."""
+        if confidence >= 0.85:
+            weight = 1.60
+        elif confidence >= 0.70:
+            weight = 1.35
+        elif confidence >= 0.55:
+            weight = 1.15
+        elif confidence >= 0.45:
+            weight = 1.00
+        else:
+            weight = 0.85
+
+        weighted_budget = base_budget * weight
+        min_order = float(self.config.risk.min_order_idr)
+        return max(min_order, weighted_budget)
+
     async def _run_cycle(self):
         """Run one complete analysis → signal → execution cycle for all pairs concurrently."""
         cycle_start = datetime.now(timezone.utc)
@@ -556,6 +573,23 @@ class TradingAgent:
             )
             atr = atr_fallback
 
+        weighted_budget = self._confidence_weighted_budget(per_order_budget, signal.confidence)
+
+        # Live mode: cap weighted budget by real-time free balance.
+        # This keeps concurrent entries aligned with what can actually be spent.
+        if self.config.trading.mode == "live":
+            try:
+                balance = await self.market_data.fetch_balance()
+                free_idr = float(balance.get("free", {}).get("IDR", 0) or 0)
+                weighted_budget = min(weighted_budget, free_idr * 0.95)
+            except Exception as e:
+                logger.warning(f"⚠️ {symbol}: gagal refresh free balance untuk budget cap: {e}")
+
+        logger.info(
+            f"💰 {symbol}: Budget cap weighted by confidence "
+            f"({signal.confidence:.0%}) = Rp {weighted_budget:,.0f}"
+        )
+
         # Calculate order with risk management
         order_plan = self.risk_manager.calculate_order(
             symbol=symbol,
@@ -563,7 +597,7 @@ class TradingAgent:
             entry_price=entry_price,
             atr=atr,
             equity=account_equity,
-            budget_cap=per_order_budget,
+            budget_cap=weighted_budget,
             market_regime=market_regime,
             daily_target_met=daily_target_met,
         )
