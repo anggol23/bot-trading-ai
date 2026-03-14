@@ -313,9 +313,53 @@ class SignalGenerator:
         sell_signals = sum(1 for a in actions if a in ("SELL", "STRONG_SELL"))
         total = len(actions)
 
+        bullish_tfs = sum(1 for t in tech_signals.values() if t and t.trend == "BULLISH")
+        bearish_tfs = sum(1 for t in tech_signals.values() if t and t.trend == "BEARISH")
+        avg_tech_conf = (
+            sum(t.confidence for t in tech_signals.values() if t is not None) / len(tech_signals)
+            if tech_signals
+            else 0.0
+        )
+
         # Use the primary timeframe signal as base
         primary_tf = list(signals.keys())[0]  # Usually "1h"
         primary = signals[primary_tf]
+
+        # Adaptive MTF fallback: allow entry when technical alignment is strong,
+        # while volume is not explicitly opposing the direction.
+        if buy_signals == 0 and sell_signals == 0:
+            if (
+                bullish_tfs >= 2
+                and volume_signal.net_flow != "DISTRIBUTING"
+                and volume_signal.whale_score >= 4
+                and volume_signal.imbalance_score > -0.35
+            ):
+                primary.action = "BUY"
+                primary.confidence = max(
+                    primary.confidence,
+                    round(min(0.95, avg_tech_conf * 0.65 + max(volume_signal.confidence, 0.35) * 0.35), 2),
+                )
+                primary.reason += (
+                    f" | ✅ ADAPTIVE MTF: {bullish_tfs}/{total} timeframe teknikal bullish "
+                    f"dengan volume tidak kontra kuat (whale {volume_signal.whale_score}/10)"
+                )
+                buy_signals = bullish_tfs
+            elif (
+                bearish_tfs >= 2
+                and volume_signal.net_flow != "ACCUMULATING"
+                and volume_signal.whale_score >= 4
+                and volume_signal.imbalance_score < 0.35
+            ):
+                primary.action = "SELL"
+                primary.confidence = max(
+                    primary.confidence,
+                    round(min(0.95, avg_tech_conf * 0.65 + max(volume_signal.confidence, 0.35) * 0.35), 2),
+                )
+                primary.reason += (
+                    f" | ✅ ADAPTIVE MTF: {bearish_tfs}/{total} timeframe teknikal bearish "
+                    f"dengan volume tidak kontra kuat (whale {volume_signal.whale_score}/10)"
+                )
+                sell_signals = bearish_tfs
 
         # Multi-TF confirmation
         if buy_signals >= 2:

@@ -107,3 +107,31 @@ class TestSignalGenerator:
             _volume("NEUTRAL", confidence=0.1, imbalance_score=0.0),
         )
         assert signal.action == "HOLD"
+
+    def test_multi_tf_adaptive_fallback_allows_buy(self):
+        """Strong multi-TF bullish alignment with non-opposing volume can become BUY."""
+        tech_signals = {
+            "1h": _tech("BULLISH", "MODERATE", confidence=0.82),
+            "4h": TechnicalSignal(
+                symbol="BTC/IDR",
+                timeframe="4h",
+                trend="BULLISH",
+                momentum="STRONG",
+                volatility="MEDIUM",
+                confidence=0.9,
+                rsi=60.0,
+                atr=20000000,
+            ),
+        }
+        volume = VolumeSignal(
+            symbol="BTC/IDR",
+            net_flow="NEUTRAL",
+            intensity="HIGH",
+            imbalance_score=-0.1,
+            confidence=0.5,
+            whale_score=5,
+        )
+
+        signal = self.gen.generate_multi_timeframe(tech_signals, volume)
+        assert signal.action in ("BUY", "STRONG_BUY")
+        assert signal.timeframes_aligned >= 2
