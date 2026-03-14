@@ -43,6 +43,7 @@ class RiskManager:
         entry_price: float,
         atr: float,
         equity: float,
+        budget_cap: Optional[float] = None,
         market_regime: str = "NORMAL",
         daily_target_met: bool = False,
     ) -> OrderPlan:
@@ -139,6 +140,26 @@ class RiskManager:
             position_size = (equity * 0.95) / entry_price
             cost = position_size * entry_price
             risk_amount = position_size * sl_distance
+
+        # Budget-aware split sizing: cap notional per order by available budget slice.
+        if budget_cap is not None:
+            max_cost_from_budget = max(0.0, budget_cap * 0.95)
+            if max_cost_from_budget < self.config.risk.min_order_idr:
+                return self._rejected_order(
+                    symbol,
+                    side,
+                    entry_price,
+                    (
+                        f"Budget slice terlalu kecil ({budget_cap:,.0f} IDR). "
+                        f"Butuh >= {self.config.risk.min_order_idr:,.0f} IDR untuk minimum order"
+                    ),
+                )
+
+            if cost > max_cost_from_budget:
+                position_size = max_cost_from_budget / entry_price
+                cost = position_size * entry_price
+                risk_amount = position_size * sl_distance
+                active_risk_pct = (risk_amount / equity) if equity > 0 else active_risk_pct
 
         # Exchange minimum notional guard:
         # if position is too small, optionally upscale to minimum order,

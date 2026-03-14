@@ -226,17 +226,24 @@ class TradingAgent:
             if self.config.trading.mode == "paper":
                 today_trades = self.db.get_trades_today()
                 realized_today = sum(t.get("pnl", 0) for t in today_trades if t.get("pnl") is not None)
-                equity = 300_000 + realized_today
+                account_equity = 300_000 + realized_today
+                available_budget = account_equity
             else:
                 try:
                     balance = await self.market_data.fetch_balance()
-                    equity = balance.get("free", {}).get("IDR", 0)
+                    free_idr = float(balance.get("free", {}).get("IDR", 0) or 0)
+                    total_idr = float(balance.get("total", {}).get("IDR", 0) or 0)
+                    used_idr = float(balance.get("used", {}).get("IDR", 0) or 0)
+                    # Account target should use account-level equity, not per-entry budget.
+                    account_equity = total_idr if total_idr > 0 else (free_idr + used_idr)
+                    available_budget = free_idr
                 except Exception as e:
                     logger.warning(f"⚠️ Error fetching balance for equity: {e}")
-                    equity = 0
+                    account_equity = 0
+                    available_budget = 0
 
-            target_idr = self.risk_manager.get_daily_target_profit_idr(equity)
-            daily_target_met = self.risk_manager.check_daily_target_met(equity)
+            target_idr = self.risk_manager.get_daily_target_profit_idr(account_equity)
+            daily_target_met = self.risk_manager.check_daily_target_met(account_equity)
             if daily_target_met:
                 logger.info(
                     f"🎯 DAILY TARGET MET (>= Rp {target_idr:,.0f}): "
@@ -248,13 +255,28 @@ class TradingAgent:
                     "Switching to aggressive / hunter mode"
                 )
 
+            symbols_count = max(1, len(self.config.trading.pairs))
+            per_order_budget = available_budget / symbols_count
+            logger.info(
+                f"💼 Budget Split: Available Rp {available_budget:,.0f} | "
+                f"Pairs {symbols_count} | Budget/order Rp {per_order_budget:,.0f}"
+            )
+
             # ──── Step 1: Analyze All Trading Pairs Concurrently ────
             # To avoid overloading the exchange, we can batch them.
             # But ccxt async_support handles internal connection pooling and rate limiting if enabled.
             # For 100+ pairs, we should probably chunk them. But assuming ~30 liquid pairs, gather is fine.
             tasks = []
             for symbol in self.config.trading.pairs:
-                tasks.append(self._analyze_pair(symbol, daily_target_met, market_regime, equity))
+                tasks.append(
+                    self._analyze_pair(
+                        symbol,
+                        daily_target_met,
+                        market_regime,
+                        account_equity,
+                        per_order_budget,
+                    )
+                )
                 
             results = await asyncio.gather(*tasks, return_exceptions=True)
             for symbol, res in zip(self.config.trading.pairs, results):
@@ -270,7 +292,14 @@ class TradingAgent:
         except Exception as e:
             logger.error(f"❌ Fatal error in analysis cycle: {e}")
 
-    async def _analyze_pair(self, symbol: str, daily_target_met: bool, market_regime: str, equity: float):
+    async def _analyze_pair(
+        self,
+        symbol: str,
+        daily_target_met: bool,
+        market_regime: str,
+        account_equity: float,
+        per_order_budget: float,
+    ):
         """Analyze a single trading pair and execute if signal is strong."""
         logger.info(f"\n{'─' * 40}")
         logger.info(f"📊 Analyzing: {symbol}")
@@ -393,7 +422,16 @@ class TradingAgent:
         logger.info(f"   Reason: {trading_signal.reason}")
 
         # ──── Execute Trading Decision ────
-        await self._execute_signal(symbol, trading_signal, tech_signals, signal_id, daily_target_met, market_regime, equity)
+        await self._execute_signal(
+            symbol,
+            trading_signal,
+            tech_signals,
+            signal_id,
+            daily_target_met,
+            market_regime,
+            account_equity,
+            per_order_budget,
+        )
 
     async def _execute_signal(
         self,
@@ -403,7 +441,8 @@ class TradingAgent:
         signal_id: int,
         daily_target_met: bool,
         market_regime: str,
-        equity: float,
+        account_equity: float,
+        per_order_budget: float,
     ):
         """Execute trading decision based on signal."""
 
@@ -523,7 +562,8 @@ class TradingAgent:
             side=side,
             entry_price=entry_price,
             atr=atr,
-            equity=equity,
+            equity=account_equity,
+            budget_cap=per_order_budget,
             market_regime=market_regime,
             daily_target_met=daily_target_met,
         )
