@@ -331,8 +331,8 @@ class SignalGenerator:
             if (
                 bullish_tfs >= 2
                 and volume_signal.net_flow != "DISTRIBUTING"
-                and volume_signal.whale_score >= 4
-                and volume_signal.imbalance_score > -0.35
+                and volume_signal.whale_score >= 3
+                and volume_signal.imbalance_score > -0.45
             ):
                 primary.action = "BUY"
                 primary.confidence = max(
@@ -347,8 +347,8 @@ class SignalGenerator:
             elif (
                 bearish_tfs >= 2
                 and volume_signal.net_flow != "ACCUMULATING"
-                and volume_signal.whale_score >= 4
-                and volume_signal.imbalance_score < 0.35
+                and volume_signal.whale_score >= 3
+                and volume_signal.imbalance_score < 0.45
             ):
                 primary.action = "SELL"
                 primary.confidence = max(
@@ -396,7 +396,7 @@ class SignalGenerator:
         if not daily_target_met:
             # Not yet met daily target -> AGGRESSIVE HUNTER MODE
             # Boost confidence slightly to trigger more trades ONLY IF Whale is actually present
-            if volume_signal and volume_signal.whale_score >= 7:
+            if volume_signal and volume_signal.whale_score >= 5:
                 primary.confidence = min(1.0, primary.confidence * 1.5)
                 primary.reason += " | 🎯 HUNTER MODE: Mengejar target harian (Whale Verified)"
             else:
