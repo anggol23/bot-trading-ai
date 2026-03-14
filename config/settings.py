@@ -39,6 +39,9 @@ class RiskConfig:
     min_entry_confidence: float = 0.62  # Minimum confidence for normal entries
     first_trade_min_confidence: float = 0.50  # Slightly lower threshold for first trade of the day
     max_trades_per_day: int = 4  # Prevent overtrading and fee bleed
+    force_reentry_until_target: bool = True  # Keep entering while daily target is not met
+    max_trades_hard_cap: int = 20  # Absolute trade cap to avoid runaway loops
+    pre_target_confidence_multiplier: float = 0.85  # Lower confidence threshold before target
     stop_loss_atr_multiplier: float = 2.0  # Increased from 1.5 to 2.0 to give trade more breathing room
     take_profit_rr_ratio: float = 2.0     # Risk:Reward = 1:2
     enable_pyramiding: bool = True
@@ -121,6 +124,9 @@ class Config:
             min_entry_confidence=float(os.getenv("MIN_ENTRY_CONFIDENCE", "0.62")),
             first_trade_min_confidence=float(os.getenv("FIRST_TRADE_MIN_CONFIDENCE", "0.50")),
             max_trades_per_day=int(os.getenv("MAX_TRADES_PER_DAY", "4")),
+            force_reentry_until_target=os.getenv("FORCE_REENTRY_UNTIL_TARGET", "true").lower() == "true",
+            max_trades_hard_cap=int(os.getenv("MAX_TRADES_HARD_CAP", "20")),
+            pre_target_confidence_multiplier=float(os.getenv("PRE_TARGET_CONFIDENCE_MULTIPLIER", "0.85")),
             stop_loss_atr_multiplier=float(os.getenv("STOP_LOSS_ATR_MULTIPLIER", "2.0")),
             take_profit_rr_ratio=float(os.getenv("TAKE_PROFIT_RR_RATIO", "2.0")),
             enable_pyramiding=os.getenv("ENABLE_PYRAMIDING", "true").lower() == "true",
@@ -181,6 +187,12 @@ class Config:
 
         if self.risk.max_trades_per_day < 1:
             issues.append("WARNING: MAX_TRADES_PER_DAY must be at least 1")
+
+        if self.risk.max_trades_hard_cap < self.risk.max_trades_per_day:
+            issues.append("WARNING: MAX_TRADES_HARD_CAP should be >= MAX_TRADES_PER_DAY")
+
+        if not (0.5 <= self.risk.pre_target_confidence_multiplier <= 1.5):
+            issues.append("WARNING: PRE_TARGET_CONFIDENCE_MULTIPLIER should be in range 0.5..1.5")
 
         if self.risk.daily_target_profit_min_idr < 0:
             issues.append("WARNING: DAILY_TARGET_PROFIT_MIN_IDR cannot be negative")

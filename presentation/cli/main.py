@@ -448,18 +448,37 @@ class TradingAgent:
         # Guardrails for daily consistency: avoid weak setups and overtrading.
         today_trades = self.db.get_trades_today()
         trades_count_today = len(today_trades)
-        if trades_count_today >= self.config.risk.max_trades_per_day:
+
+        if trades_count_today >= self.config.risk.max_trades_hard_cap:
             logger.info(
-                f"🧯 {symbol}: HOLD — Daily trade cap reached "
-                f"({trades_count_today}/{self.config.risk.max_trades_per_day})"
+                f"🧱 {symbol}: HOLD — Hard daily trade cap reached "
+                f"({trades_count_today}/{self.config.risk.max_trades_hard_cap})"
             )
             return
+
+        if trades_count_today >= self.config.risk.max_trades_per_day:
+            if daily_target_met or not self.config.risk.force_reentry_until_target:
+                logger.info(
+                    f"🧯 {symbol}: HOLD — Daily trade cap reached "
+                    f"({trades_count_today}/{self.config.risk.max_trades_per_day})"
+                )
+                return
+
+            logger.info(
+                f"🔥 {symbol}: Aggressive re-entry enabled before daily target "
+                f"({trades_count_today}/{self.config.risk.max_trades_per_day}, "
+                f"hard cap {self.config.risk.max_trades_hard_cap})"
+            )
 
         min_confidence = (
             self.config.risk.first_trade_min_confidence
             if trades_count_today == 0
             else self.config.risk.min_entry_confidence
         )
+
+        if not daily_target_met:
+            min_confidence *= self.config.risk.pre_target_confidence_multiplier
+
         if signal.confidence < min_confidence:
             logger.info(
                 f"📉 {symbol}: HOLD — Confidence too low "
