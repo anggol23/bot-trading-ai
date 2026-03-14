@@ -216,23 +216,51 @@ class SignalGenerator:
                 volume=volume,
             )
 
-        # BULLISH + DISTRIBUTING → conflicting → HOLD
+        # BULLISH + DISTRIBUTING → usually conflicting.
+        # In mild distribution, allow a small buy-the-dip probe.
         if tech and tech.trend == "BULLISH" and volume.net_flow == "DISTRIBUTING":
+            if volume.imbalance_score <= -0.45 or volume.confidence >= 0.75:
+                return TradingSignal(
+                    symbol=symbol,
+                    action="HOLD",
+                    confidence=0.2,
+                    reason=(
+                        f"⚠️ Sinyal berlawanan: Trend BULLISH tapi terjadi DISTRIBUSI kuat | "
+                        f"Smart money keluar — hati-hati!"
+                    ),
+                    technical=tech,
+                    volume=volume,
+                )
+
+            dip_confidence = round(max(0.25, min(0.65, tech.confidence * 0.65 + volume.confidence * 0.15)), 2)
             return TradingSignal(
                 symbol=symbol,
-                action="HOLD",
-                confidence=0.2,
+                action="BUY",
+                confidence=dip_confidence,
                 reason=(
-                    f"⚠️ Sinyal berlawanan: Trend BULLISH tapi terjadi DISTRIBUSI | "
-                    f"Smart money keluar — hati-hati!"
+                    f"🟨 BUY THE DIP: Trend BULLISH dengan distribusi ringan | "
+                    f"Imbalance: {volume.imbalance_score:+.3f} | Entry bertahap dengan risiko ketat"
                 ),
                 technical=tech,
                 volume=volume,
             )
 
-        # STRONG TREND + NEUTRAL VOLUME -> VETO (USER RULE)
+        # STRONG TREND + NEUTRAL VOLUME
         if tech and volume.net_flow == "NEUTRAL":
-            if tech.trend == "BULLISH" and tech.confidence >= 0.4:
+            if tech.trend == "BULLISH" and tech.confidence >= 0.7 and volume.whale_score >= 3 and volume.imbalance_score > -0.25:
+                return TradingSignal(
+                    symbol=symbol,
+                    action="BUY",
+                    confidence=round(max(0.35, tech.confidence * 0.55), 2),
+                    reason=(
+                        f"🟡 EARLY BUY: Teknis {tech.trend} kuat meski volume NEUTRAL "
+                        f"(Whale {volume.whale_score}/10, Imbalance {volume.imbalance_score:+.3f})"
+                    ),
+                    technical=tech,
+                    volume=volume,
+                )
+
+            if tech.trend in ("BULLISH", "BEARISH") and tech.confidence >= 0.4:
                 return TradingSignal(
                     symbol=symbol,
                     action="HOLD",
@@ -241,19 +269,9 @@ class SignalGenerator:
                     technical=tech,
                     volume=volume,
                 )
-            elif tech.trend == "BEARISH" and tech.confidence >= 0.4:
-                return TradingSignal(
-                    symbol=symbol,
-                    action="HOLD",
-                    confidence=round(tech.confidence * 0.3, 2),
-                    reason=f"⚠️ VETO (USER RULE): Teknis {tech.trend} murni tanpa konfirmasi Volume Whale (Whale Confidence: {volume.whale_score}/10) → HOLD. Sinyal teknikal diabaikan.",
-                    technical=tech,
-                    volume=volume,
-                )
-        
-        # WHALE SCORE VETO -> STRONGLY ENFORCE USER RULE
-        if volume.whale_score < 7:
-            # If Whale score is strictly below 7, it's not a whale, VETO it.
+
+        # WHALE SCORE VETO: still enforced but less rigid for aggressive mode
+        if volume.whale_score < 3:
             return TradingSignal(
                 symbol=symbol,
                 action="HOLD",
@@ -328,9 +346,18 @@ class SignalGenerator:
         # Adaptive MTF fallback: allow entry when technical alignment is strong,
         # while volume is not explicitly opposing the direction.
         if buy_signals == 0 and sell_signals == 0:
+            bullish_volume_not_contra = (
+                volume_signal.net_flow != "DISTRIBUTING"
+                or (
+                    market_regime == "TRENDING_BULL"
+                    and volume_signal.imbalance_score > -0.35
+                    and volume_signal.confidence < 0.75
+                )
+            )
+
             if (
                 bullish_tfs >= 2
-                and volume_signal.net_flow != "DISTRIBUTING"
+                and bullish_volume_not_contra
                 and volume_signal.whale_score >= 3
                 and volume_signal.imbalance_score > -0.45
             ):
@@ -395,8 +422,8 @@ class SignalGenerator:
         # Apply Target Profit (Minimum Profit Mode) logic
         if not daily_target_met:
             # Not yet met daily target -> AGGRESSIVE HUNTER MODE
-            # Boost confidence slightly to trigger more trades ONLY IF Whale is actually present
-            if volume_signal and volume_signal.whale_score >= 5:
+            # Boost confidence slightly to trigger more trades when whale flow is at least moderate.
+            if volume_signal and volume_signal.whale_score >= 4:
                 primary.confidence = min(1.0, primary.confidence * 1.5)
                 primary.reason += " | 🎯 HUNTER MODE: Mengejar target harian (Whale Verified)"
             else:
@@ -414,9 +441,14 @@ class SignalGenerator:
             primary.reason += " | 🌊 CHOPPY MARKET: Waspada sinyal palsu"
         elif market_regime == "VOLATILE":
             primary.reason += " | ⚡ VOLATILE MARKET: Perhatikan SL"
-        elif market_regime == "TRENDING_BULL" and primary.action in ("BUY", "STRONG_BUY"):
-            primary.confidence = min(1.0, primary.confidence * 1.2)
-            primary.reason += " | 🚀 STRONG BULL REGIME: Sinyal Buy dikuatkan"
+        elif market_regime == "TRENDING_BULL":
+            if primary.action in ("BUY", "STRONG_BUY"):
+                primary.confidence = min(1.0, primary.confidence * 1.2)
+                primary.reason += " | 🚀 STRONG BULL REGIME: Sinyal Buy dikuatkan"
+            elif primary.action in ("SELL", "STRONG_SELL") and primary.confidence < 0.8:
+                primary.action = "HOLD"
+                primary.confidence *= 0.6
+                primary.reason += " | 🛡️ BULL FILTER: Counter-trend sell lemah diabaikan"
         elif market_regime == "TRENDING_BEAR":
             # Market Correlation Veto: Don't buy anything if BTC is crashing
             if primary.action in ("BUY", "STRONG_BUY"):

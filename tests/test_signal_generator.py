@@ -60,13 +60,21 @@ class TestSignalGenerator:
         assert "panic" in signal.reason.lower() or "PANIC" in signal.reason
 
     def test_conflicting_signals_is_hold(self):
-        """Bullish price + volume distribution → HOLD (conflicting)."""
+        """Bullish price + strong distribution → HOLD (conflicting)."""
         signal = self.gen.generate(
             _tech("BULLISH"),
-            _volume("DISTRIBUTING", imbalance_score=-0.5),
+            _volume("DISTRIBUTING", confidence=0.8, imbalance_score=-0.5),
         )
         assert signal.action == "HOLD"
         assert "berlawanan" in signal.reason.lower() or "hati" in signal.reason.lower()
+
+    def test_bullish_mild_distribution_can_buy_dip(self):
+        """Bullish trend + mild distribution can produce a cautious BUY."""
+        signal = self.gen.generate(
+            _tech("BULLISH", "MODERATE", confidence=0.82),
+            _volume("DISTRIBUTING", confidence=0.5, imbalance_score=-0.25),
+        )
+        assert signal.action in ("BUY", "STRONG_BUY")
 
     def test_neutral_trend_with_volume_is_hold(self):
         """Neutral trend + volume activity → HOLD (wait for trend)."""
@@ -135,3 +143,30 @@ class TestSignalGenerator:
         signal = self.gen.generate_multi_timeframe(tech_signals, volume)
         assert signal.action in ("BUY", "STRONG_BUY")
         assert signal.timeframes_aligned >= 2
+
+    def test_multi_tf_bull_regime_allows_mild_distribution_buy(self):
+        """In strong bull regime, mild distribution should not block adaptive BUY."""
+        tech_signals = {
+            "1h": _tech("BULLISH", "MODERATE", confidence=0.8),
+            "4h": TechnicalSignal(
+                symbol="BTC/IDR",
+                timeframe="4h",
+                trend="BULLISH",
+                momentum="MODERATE",
+                volatility="MEDIUM",
+                confidence=0.86,
+                rsi=59.0,
+                atr=18000000,
+            ),
+        }
+        volume = VolumeSignal(
+            symbol="BTC/IDR",
+            net_flow="DISTRIBUTING",
+            intensity="HIGH",
+            imbalance_score=-0.30,
+            confidence=0.6,
+            whale_score=4,
+        )
+
+        signal = self.gen.generate_multi_timeframe(tech_signals, volume, market_regime="TRENDING_BULL")
+        assert signal.action in ("BUY", "STRONG_BUY")
