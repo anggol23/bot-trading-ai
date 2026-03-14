@@ -18,11 +18,12 @@ def _tech(trend="BULLISH", momentum="STRONG", confidence=0.8, rsi=55.0):
     )
 
 
-def _volume(net_flow="ACCUMULATING", intensity="HIGH", confidence=0.7, imbalance_score=0.6):
+def _volume(net_flow="ACCUMULATING", intensity="HIGH", confidence=0.7, imbalance_score=0.6, whale_score=0):
     return VolumeSignal(
         symbol="BTC/IDR",
         net_flow=net_flow, intensity=intensity,
         imbalance_score=imbalance_score, confidence=confidence,
+        whale_score=whale_score,
     )
 
 
@@ -76,13 +77,30 @@ class TestSignalGenerator:
         )
         assert signal.action in ("BUY", "STRONG_BUY")
 
-    def test_neutral_trend_with_volume_is_hold(self):
-        """Neutral trend + volume activity → HOLD (wait for trend)."""
+    def test_neutral_trend_accumulating_is_smart_money_buy(self):
+        """Neutral trend + volume accumulation → BUY (smart money leads)."""
         signal = self.gen.generate(
             _tech("NEUTRAL", "WEAK"),
             _volume("ACCUMULATING"),
         )
+        assert signal.action == "BUY"
+
+    def test_neutral_trend_distributing_is_hold(self):
+        """Neutral trend + distribution → HOLD (wait for clearer direction)."""
+        signal = self.gen.generate(
+            _tech("NEUTRAL", "WEAK"),
+            _volume("DISTRIBUTING", imbalance_score=-0.4),
+        )
         assert signal.action == "HOLD"
+
+    def test_neutral_trend_range_buy_on_high_volume(self):
+        """Neutral trend + NEUTRAL HIGH volume + good whale + tight imbalance → Range BUY."""
+        signal = self.gen.generate(
+            _tech("NEUTRAL", "WEAK", confidence=0.5),
+            _volume("NEUTRAL", "HIGH", confidence=0.55, imbalance_score=-0.10, whale_score=5),
+        )
+        assert signal.action == "BUY"
+        assert signal.confidence >= 0.48
 
     def test_no_data_is_hold(self):
         """No data at all → HOLD."""

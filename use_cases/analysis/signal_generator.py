@@ -201,8 +201,40 @@ class SignalGenerator:
                 volume=volume,
             )
 
-        # NEUTRAL trend → always HOLD (wait for clear direction)
+        # NEUTRAL tech trend — check volume for directional clues
         if tech and tech.trend == "NEUTRAL":
+            # NEUTRAL + ACCUMULATING → smart money leads, follow the whale
+            if volume.net_flow == "ACCUMULATING":
+                return TradingSignal(
+                    symbol=symbol,
+                    action="BUY",
+                    confidence=round(max(0.45, volume.confidence * 0.75), 2),
+                    reason=(
+                        f"🔵 SMART MONEY BUY: Teknis NEUTRAL tapi Volume AKUMULASI aktif "
+                        f"(Whale {volume.whale_score}/10, Imbalance {volume.imbalance_score:+.3f})"
+                    ),
+                    technical=tech,
+                    volume=volume,
+                )
+            # NEUTRAL + NEUTRAL volume + HIGH intensity + healthy whale + acceptable imbalance → Range BUY
+            if (
+                volume.net_flow == "NEUTRAL"
+                and volume.intensity == "HIGH"
+                and volume.whale_score >= 4
+                and volume.imbalance_score > -0.25
+            ):
+                return TradingSignal(
+                    symbol=symbol,
+                    action="BUY",
+                    confidence=round(max(0.48, volume.confidence * 0.80), 2),
+                    reason=(
+                        f"🔵 RANGE BUY: Trend NEUTRAL + High Volume Activity + Whale Aktif "
+                        f"(Whale {volume.whale_score}/10, Imbalance {volume.imbalance_score:+.3f})"
+                    ),
+                    technical=tech,
+                    volume=volume,
+                )
+            # Otherwise wait for clearer direction
             return TradingSignal(
                 symbol=symbol,
                 action="HOLD",
