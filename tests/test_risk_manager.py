@@ -214,3 +214,35 @@ class TestRiskManager:
         # 2% of 5,000,000 is 100,000, so percentage target should win.
         target = self.risk_mgr.get_daily_target_profit_idr(5_000_000)
         assert target == 100_000
+
+    def test_min_order_autoscale_keeps_order_executable(self):
+        """If calculated cost is below exchange minimum, plan is upscaled when implied risk is still safe."""
+        self.config.risk.risk_per_trade = 0.02
+        self.config.risk.min_order_idr = 10_000
+
+        plan = self.risk_mgr.calculate_order(
+            symbol="BTC/IDR",
+            side="buy",
+            entry_price=100,
+            atr=10,
+            equity=110_000,
+        )
+
+        assert plan.approved is True
+        assert plan.cost >= self.config.risk.min_order_idr
+
+    def test_min_order_autoscale_rejected_if_risk_too_high(self):
+        """Upscale must be rejected when meeting min order would exceed absolute risk cap."""
+        self.config.risk.risk_per_trade = 0.005
+        self.config.risk.min_order_idr = 10_000
+
+        plan = self.risk_mgr.calculate_order(
+            symbol="BTC/IDR",
+            side="buy",
+            entry_price=1_000,
+            atr=250,
+            equity=110_000,
+        )
+
+        assert plan.approved is False
+        assert "minimum order" in plan.rejection_reason.lower()

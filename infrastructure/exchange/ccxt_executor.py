@@ -7,9 +7,6 @@ import math
 from datetime import datetime
 from typing import Dict, Any, Optional
 
-# Indodax minimum order size in IDR
-MIN_ORDER_IDR = 10_000
-
 from config.settings import Config
 from core.interfaces.market_data_port import IMarketData
 from core.interfaces.database_port import IDatabase
@@ -91,11 +88,13 @@ class OrderExecutor(IExecutor):
             logger.error("❌ Cannot execute live order: No API key configured")
             return None
 
+        min_order_idr = float(self.config.risk.min_order_idr)
+
         # ─── Pre-flight: Minimum Order Validation ───
-        if plan.cost < MIN_ORDER_IDR:
+        if plan.cost < min_order_idr:
             logger.error(
                 f"❌ Order DITOLAK {plan.symbol}: Cost {plan.cost:,.0f} IDR "
-                f"< minimum order Indodax {MIN_ORDER_IDR:,} IDR. "
+                f"< minimum order Indodax {min_order_idr:,.0f} IDR. "
                 f"Top up saldo atau naikkan RISK_PER_TRADE."
             )
             return None

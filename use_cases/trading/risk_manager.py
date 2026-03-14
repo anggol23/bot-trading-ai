@@ -25,6 +25,8 @@ class RiskManager:
     - Daily drawdown limit: 5%
     """
 
+    ABSOLUTE_RISK_CAP_PCT = 0.05  # Never exceed 5% implied risk when auto-adjusting
+
     def __init__(self, config: Config, db: IDatabase):
         self.config = config
         self.db = db
@@ -137,6 +139,35 @@ class RiskManager:
             position_size = (equity * 0.95) / entry_price
             cost = position_size * entry_price
             risk_amount = position_size * sl_distance
+
+        # Exchange minimum notional guard:
+        # if position is too small, optionally upscale to minimum order,
+        # but only if implied risk remains under absolute risk cap.
+        min_order = float(self.config.risk.min_order_idr)
+        if side == "buy" and cost < min_order:
+            min_size = min_order / entry_price
+            min_risk_amount = min_size * sl_distance
+            min_risk_pct = (min_risk_amount / equity) if equity > 0 else 1.0
+
+            if min_risk_pct <= self.ABSOLUTE_RISK_CAP_PCT and min_order <= equity * 0.95:
+                logger.info(
+                    f"📏 Auto-upscale {symbol}: cost {cost:,.0f} → {min_order:,.0f} IDR "
+                    f"untuk memenuhi minimum order exchange (implied risk {min_risk_pct*100:.2f}%)"
+                )
+                position_size = min_size
+                cost = min_order
+                risk_amount = min_risk_amount
+                active_risk_pct = min_risk_pct
+            else:
+                return self._rejected_order(
+                    symbol,
+                    side,
+                    entry_price,
+                    (
+                        f"Cost {cost:,.0f} IDR < minimum order {min_order:,.0f} IDR, "
+                        f"dan upscale melampaui batas risiko aman ({min_risk_pct*100:.2f}% > {self.ABSOLUTE_RISK_CAP_PCT*100:.0f}%)"
+                    ),
+                )
 
         # ──── Risk:Reward validation ────
         reward_amount = position_size * (sl_distance * active_tp_rr)

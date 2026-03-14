@@ -42,6 +42,7 @@ class RiskConfig:
     force_reentry_until_target: bool = True  # Keep entering while daily target is not met
     max_trades_hard_cap: int = 20  # Absolute trade cap to avoid runaway loops
     pre_target_confidence_multiplier: float = 0.85  # Lower confidence threshold before target
+    min_order_idr: float = 10_000.0  # Exchange minimum notional per order (Indodax)
     stop_loss_atr_multiplier: float = 2.0  # Increased from 1.5 to 2.0 to give trade more breathing room
     take_profit_rr_ratio: float = 2.0     # Risk:Reward = 1:2
     enable_pyramiding: bool = True
@@ -127,6 +128,7 @@ class Config:
             force_reentry_until_target=os.getenv("FORCE_REENTRY_UNTIL_TARGET", "true").lower() == "true",
             max_trades_hard_cap=int(os.getenv("MAX_TRADES_HARD_CAP", "20")),
             pre_target_confidence_multiplier=float(os.getenv("PRE_TARGET_CONFIDENCE_MULTIPLIER", "0.85")),
+            min_order_idr=float(os.getenv("MIN_ORDER_IDR", "10000")),
             stop_loss_atr_multiplier=float(os.getenv("STOP_LOSS_ATR_MULTIPLIER", "2.0")),
             take_profit_rr_ratio=float(os.getenv("TAKE_PROFIT_RR_RATIO", "2.0")),
             enable_pyramiding=os.getenv("ENABLE_PYRAMIDING", "true").lower() == "true",
@@ -193,6 +195,9 @@ class Config:
 
         if not (0.5 <= self.risk.pre_target_confidence_multiplier <= 1.5):
             issues.append("WARNING: PRE_TARGET_CONFIDENCE_MULTIPLIER should be in range 0.5..1.5")
+
+        if self.risk.min_order_idr < 1_000:
+            issues.append("WARNING: MIN_ORDER_IDR terlalu rendah; cek minimum exchange")
 
         if self.risk.daily_target_profit_min_idr < 0:
             issues.append("WARNING: DAILY_TARGET_PROFIT_MIN_IDR cannot be negative")
