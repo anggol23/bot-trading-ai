@@ -30,7 +30,7 @@ class VolumeAnomalyConfig:
 @dataclass
 class RiskConfig:
     risk_per_trade: float = 0.02          # 2% max per position
-    max_open_positions: int = 3
+    max_open_positions: int = 0  # <= 0 means unlimited open positions
     daily_drawdown_limit: float = 0.05    # 5% daily max drawdown
     punishment_drawdown_pct: float = 0.02 # 2% daily loss triggers punishment (halved risk)
     daily_target_profit_pct: float = 0.01  # 1% daily target profit
@@ -116,7 +116,7 @@ class Config:
 
         self.risk = RiskConfig(
             risk_per_trade=float(os.getenv("RISK_PER_TRADE", "0.02")),
-            max_open_positions=int(os.getenv("MAX_OPEN_POSITIONS", "3")),
+            max_open_positions=int(os.getenv("MAX_OPEN_POSITIONS", "0")),
             daily_drawdown_limit=float(os.getenv("DAILY_DRAWDOWN_LIMIT", "0.05")),
             punishment_drawdown_pct=float(os.getenv("PUNISHMENT_DRAWDOWN_PCT", "0.02")),
             daily_target_profit_pct=float(os.getenv("DAILY_TARGET_PROFIT", "0.01")),

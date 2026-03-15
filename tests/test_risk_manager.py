@@ -81,6 +81,8 @@ class TestRiskManager:
     def test_max_positions_limit(self):
         """Should reject when max positions reached."""
         equity = 10_000_000
+        self.config.risk.max_open_positions = 3
+        self.risk_mgr = RiskManager(self.config, self.db)
 
         # Fill up positions
         for i in range(3):
@@ -101,6 +103,30 @@ class TestRiskManager:
 
         assert plan.approved is False
         assert "posisi" in plan.rejection_reason.lower()
+
+    def test_unlimited_positions_when_zero(self):
+        """Should allow new entries when max_open_positions is disabled (<= 0)."""
+        equity = 10_000_000
+        self.config.risk.max_open_positions = 0
+        self.risk_mgr = RiskManager(self.config, self.db)
+
+        for i in range(5):
+            self.db.save_trade({
+                "symbol": f"ASSET{i}/IDR",
+                "side": "buy",
+                "order_type": "market",
+                "price": 1_000_000,
+                "amount": 1,
+                "cost": 1_000_000,
+                "status": "open",
+                "mode": "paper",
+            })
+
+        plan = self.risk_mgr.calculate_order(
+            "BTC/IDR", "buy", 1_000_000, 50_000, equity
+        )
+
+        assert plan.approved is True
 
     def test_duplicate_symbol_rejected(self):
         """Should reject if already have position in same symbol."""

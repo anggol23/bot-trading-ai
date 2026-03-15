@@ -21,7 +21,7 @@ class RiskManager:
     - Max 2% of total equity at risk per position
     - Mandatory stop loss (ATR-based)
     - Minimum Risk:Reward = 1:2
-    - Max 3 open positions simultaneously
+    - Max open positions is configurable (<= 0 means unlimited)
     - Daily drawdown limit: 5%
     """
 
@@ -229,9 +229,9 @@ class RiskManager:
     def _pre_check(self, symbol: str, equity: float, current_price: float, side: str) -> Optional[str]:
         """Run pre-flight checks before order calculation."""
 
-        # Check max open positions overall portfolio
+        # Check max open positions overall portfolio (<= 0 means unlimited)
         open_trades = self.db.get_open_trades()
-        if len(open_trades) >= self.max_positions:
+        if self.max_positions > 0 and len(open_trades) >= self.max_positions:
             return (
                 f"Maks posisi tercapai: {len(open_trades)}/{self.max_positions} | "
                 f"Tutup posisi yang ada sebelum membuka baru"
@@ -242,10 +242,6 @@ class RiskManager:
         if symbol_trades:
             if not self.config.risk.enable_pyramiding:
                 return f"Sudah ada posisi terbuka di {symbol} (Pyramiding dimatikan)"
-            
-            # Max 3 active layers per coin
-            if len(symbol_trades) >= 3:
-                return f"Batas Pyramiding maksimal tercapai (3 layers) untuk {symbol}"
                 
             # Check if existing layers meet profit threshold
             for t in symbol_trades:
