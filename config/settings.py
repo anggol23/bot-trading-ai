@@ -63,6 +63,8 @@ class RiskConfig:
 @dataclass
 class NewsConfig:
     cryptopanic_api_key: str = ""
+    cryptopanic_api_plan: str = "developer"
+    cryptopanic_public_mode: bool = True
 
 
 @dataclass
@@ -104,6 +106,8 @@ class Config:
 
         self.news = NewsConfig(
             cryptopanic_api_key=os.getenv("CRYPTOPANIC_API_KEY", ""),
+            cryptopanic_api_plan=os.getenv("CRYPTOPANIC_API_PLAN", "developer"),
+            cryptopanic_public_mode=os.getenv("CRYPTOPANIC_PUBLIC_MODE", "true").lower() == "true",
         )
 
         self.volume_anomaly = VolumeAnomalyConfig(

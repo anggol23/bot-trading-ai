@@ -1,6 +1,6 @@
 import asyncio
 import ccxt.async_support as ccxt
-import "os"
+import os
 from dotenv import load_dotenv
 
 load_dotenv()

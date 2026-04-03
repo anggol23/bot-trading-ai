@@ -38,17 +38,18 @@ class MockDB(IDatabase):
     def save_portfolio_snapshot(self, *args, **kwargs): pass
 
 def test_scenario():
-    print("--- MENGUJI LOGIKA MANAJEMEN RISIKO (PAKSAAN & HUKUMAN) ---")
+    print("--- MENGUJI LOGIKA MANAJEMEN RISIKO (HUKUMAN & LOSS STREAK) ---")
     config = Config()
     config.risk.stop_loss_atr_multiplier = 2.0
     config.risk.punishment_drawdown_pct = 0.02
     config.risk.risk_per_trade = 0.05
+    config.risk.max_consecutive_losses = 2
     
     symbol = "BTC/IDR"
     side = "buy"
-    entry_price = 100_000_000
-    atr = 500_000 # Kecilkan ATR agar stop loss dekat dan size bisa wajar
-    equity = 100_000_000 # Besarkan equity 100 jt
+    entry_price = 1_000_000
+    atr = 50_000
+    equity = 100_000_000
     
     print(f"Modal: Rp {equity:,.0f} | Harga: Rp {entry_price:,.0f} | ATR: Rp {atr:,.0f}")
     
@@ -68,11 +69,13 @@ def test_scenario():
     print("\n--- HASIL ---")
     print(f"[Normal]    Size: {plan_1.position_size:.8f} | Risk %: {plan_1.risk_percent}% | SL Multiplier Jarak: Rp {entry_price - plan_1.stop_loss:,.0f} | Cost: Rp {plan_1.cost:,.0f}")
     print(f"[Punished]  Size: {plan_2.position_size:.8f} | Risk %: {plan_2.risk_percent}% | SL Multiplier Jarak: Rp {entry_price - plan_2.stop_loss:,.0f} | Cost: Rp {plan_2.cost:,.0f}")
-    
-    assert plan_2.risk_percent == plan_1.risk_percent / 2.0, "Hukuman Pemotongan Buying Power tidak bekerja!"
-    assert (entry_price - plan_1.stop_loss) == atr * 2.0 * 1.25, "Batas Stop Loss tidak dilebarkan untuk 'Memaksa Target'!"
-    
-    print("\n✅ PENGUJIAN BERHASIL: AI kini memiliki Stop Loss lebih lebar, dan dihukum saat Drawdown harian melanggar batas.")
+
+    expected_punished_risk_pct = config.risk.risk_per_trade * 100 * 0.5 * 0.75
+    assert round(plan_1.risk_percent, 2) == 5.0, "Risk normal tidak sesuai base risk yang diharapkan"
+    assert round(plan_2.risk_percent, 2) == round(expected_punished_risk_pct, 2), "Penalty drawdown + loss streak tidak bekerja sesuai desain"
+    assert (entry_price - plan_1.stop_loss) == atr * 2.0, "Stop loss normal harus mengikuti ATR multiplier tanpa pelebaran paksa"
+
+    print("\n✅ PENGUJIAN BERHASIL: AI kini menurunkan risk saat drawdown dan loss streak tanpa memperlebar stop loss secara agresif.")
 
 if __name__ == "__main__":
     test_scenario()

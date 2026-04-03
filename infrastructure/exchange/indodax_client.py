@@ -20,6 +20,10 @@ logger = get_logger(__name__)
 class MarketDataFetcher(IMarketData):
     """Fetches market data from Indodax via ccxt."""
 
+    MARKET_LOAD_RETRY_LIMIT = 3
+    REQUEST_RETRY_LIMIT = 2
+    MARKET_CIRCUIT_BREAKER_SECONDS = 60
+
     def __init__(self, config: Config):
         self.config = config
 
@@ -37,17 +41,75 @@ class MarketDataFetcher(IMarketData):
 
         self._markets_loaded = False
         self._markets_lock = asyncio.Lock()
-        self._market_load_max_retries = 3
+        self._market_load_max_retries = self.MARKET_LOAD_RETRY_LIMIT
+        self._request_retry_limit = self.REQUEST_RETRY_LIMIT
+        self._market_circuit_open_until = 0.0
+        self._last_market_error: Optional[Exception] = None
+
+    def _market_circuit_remaining(self) -> float:
+        return max(0.0, self._market_circuit_open_until - time.monotonic())
+
+    def _invalidate_market_cache(self):
+        self._markets_loaded = False
+
+    def _trip_market_circuit(self, error: Exception):
+        self._last_market_error = error
+        self._market_circuit_open_until = (
+            time.monotonic() + self.MARKET_CIRCUIT_BREAKER_SECONDS
+        )
+        self._invalidate_market_cache()
+
+    def _raise_if_market_circuit_open(self):
+        remaining = self._market_circuit_remaining()
+        if remaining <= 0:
+            return
+
+        cached_error = self._last_market_error
+        cached_message = str(cached_error) if cached_error else "market loader unavailable"
+        raise ccxt.NetworkError(
+            f"Indodax market circuit breaker active for {remaining:.0f}s: {cached_message}"
+        )
+
+    async def _call_exchange(self, operation_name: str, operation, retry_limit: Optional[int] = None):
+        """Run an exchange call with a small retry budget for transient network failures."""
+        attempts = retry_limit or self._request_retry_limit
+        last_error = None
+
+        for attempt in range(1, attempts + 1):
+            try:
+                return await operation()
+            except ccxt.NetworkError as error:
+                last_error = error
+                if attempt >= attempts:
+                    logger.error(
+                        f"🌐 {operation_name} failed after {attempts} attempts: {error}"
+                    )
+                    raise
+
+                backoff_sec = min(2 ** (attempt - 1), 4)
+                logger.warning(
+                    f"⚠️ {operation_name} network error ({attempt}/{attempts}): {error}. "
+                    f"Retrying in {backoff_sec}s..."
+                )
+                await asyncio.sleep(backoff_sec)
+            except ccxt.ExchangeError:
+                raise
+
+        raise last_error
 
     async def _ensure_markets(self):
         """Load markets if not already loaded."""
         if self._markets_loaded:
             return
 
+        self._raise_if_market_circuit_open()
+
         # Avoid race condition: many async tasks can call _ensure_markets at once.
         async with self._markets_lock:
             if self._markets_loaded:
                 return
+
+            self._raise_if_market_circuit_open()
 
             last_error = None
             for attempt in range(1, self._market_load_max_retries + 1):
@@ -67,8 +129,10 @@ class MarketDataFetcher(IMarketData):
                         )
                         await asyncio.sleep(backoff_sec)
 
+            self._trip_market_circuit(last_error)
             logger.error(
-                f"❌ Failed to load markets after {self._market_load_max_retries} attempts: {last_error}"
+                f"❌ Failed to load markets after {self._market_load_max_retries} attempts: {last_error}. "
+                f"Opening circuit breaker for {self.MARKET_CIRCUIT_BREAKER_SECONDS}s"
             )
             raise last_error
 
@@ -96,11 +160,14 @@ class MarketDataFetcher(IMarketData):
         try:
             logger.info(f"📊 Fetching {limit} x {timeframe} candles for {symbol}")
 
-            ohlcv = await self.exchange.fetch_ohlcv(
-                symbol=symbol,
-                timeframe=timeframe,
-                limit=limit,
-                since=since,
+            ohlcv = await self._call_exchange(
+                f"fetch_ohlcv {symbol} {timeframe}",
+                lambda: self.exchange.fetch_ohlcv(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    limit=limit,
+                    since=since,
+                ),
             )
 
             if not ohlcv:
@@ -178,7 +245,10 @@ class MarketDataFetcher(IMarketData):
         await self._ensure_markets()
 
         try:
-            ticker = await self.exchange.fetch_ticker(symbol)
+            ticker = await self._call_exchange(
+                f"fetch_ticker {symbol}",
+                lambda: self.exchange.fetch_ticker(symbol),
+            )
 
             last_price = ticker.get("last") or 0
 
@@ -188,7 +258,11 @@ class MarketDataFetcher(IMarketData):
                     f"⚠️ {symbol} ticker last={last_price} — attempting orderbook fallback"
                 )
                 try:
-                    ob = await self.exchange.fetch_order_book(symbol, limit=5)
+                    ob = await self._call_exchange(
+                        f"fetch_order_book fallback {symbol}",
+                        lambda: self.exchange.fetch_order_book(symbol, limit=5),
+                        retry_limit=1,
+                    )
                     best_bid = ob["bids"][0][0] if ob.get("bids") else 0
                     best_ask = ob["asks"][0][0] if ob.get("asks") else 0
                     if best_bid > 0 and best_ask > 0:
@@ -230,7 +304,10 @@ class MarketDataFetcher(IMarketData):
         await self._ensure_markets()
 
         try:
-            order_book = await self.exchange.fetch_order_book(symbol, limit)
+            order_book = await self._call_exchange(
+                f"fetch_order_book {symbol}",
+                lambda: self.exchange.fetch_order_book(symbol, limit),
+            )
             bid_vol = sum([b[1] for b in order_book["bids"][:10]])
             ask_vol = sum([a[1] for a in order_book["asks"][:10]])
             ratio = bid_vol / ask_vol if ask_vol > 0 else 0
@@ -252,7 +329,10 @@ class MarketDataFetcher(IMarketData):
         """
         await self._ensure_markets()
         try:
-            trades = await self.exchange.fetch_trades(symbol, limit=limit)
+            trades = await self._call_exchange(
+                f"fetch_trades {symbol}",
+                lambda: self.exchange.fetch_trades(symbol, limit=limit),
+            )
             return trades
         except Exception as e:
             logger.error(f"❌ Failed to fetch trades for {symbol}: {e}")
@@ -275,7 +355,10 @@ class MarketDataFetcher(IMarketData):
             }
 
         try:
-            balance = await self.exchange.fetch_balance()
+            balance = await self._call_exchange(
+                "fetch_balance",
+                lambda: self.exchange.fetch_balance(),
+            )
             idr_total = balance.get("total", {}).get("IDR", 0)
             logger.info(f"💰 Balance: {idr_total:,.0f} IDR")
             return balance

@@ -71,7 +71,8 @@ class OmniScanner:
         except Exception as e:
             logger.error(f"❌ Omni-Scanner critical failure: {e}")
             # Fallback to configured pairs or a safe default if all else fails
-            fallback = ["BTC/IDR", "ETH/IDR", "USDT/IDR"]
+            configured_pairs = self.config.trading.pairs
+            fallback = configured_pairs if configured_pairs else ["BTC/IDR", "ETH/IDR", "USDT/IDR"]
             logger.warning(f"⚠️ Falling back to safe defaults: {fallback}")
             return fallback
 
