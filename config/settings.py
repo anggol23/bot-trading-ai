@@ -36,12 +36,13 @@ class RiskConfig:
     daily_target_profit_pct: float = 0.01  # 1% daily target profit
     daily_target_profit_min_idr: float = 30_000.0  # Absolute minimum target per day
     stop_new_entries_after_target: bool = True  # Lock gains by stopping new entries once target is reached
-    min_entry_confidence: float = 0.62  # Minimum confidence for normal entries
-    first_trade_min_confidence: float = 0.50  # Slightly lower threshold for first trade of the day
-    max_trades_per_day: int = 4  # Prevent overtrading and fee bleed
-    force_reentry_until_target: bool = True  # Keep entering while daily target is not met
+    min_entry_confidence: float = 0.72  # Minimum confidence for normal entries
+    first_trade_min_confidence: float = 0.68  # First trade still needs a high-quality setup
+    max_trades_per_day: int = 3  # Prevent overtrading and fee bleed
+    force_reentry_until_target: bool = False  # Do not chase target with repeated entries
     max_trades_hard_cap: int = 20  # Absolute trade cap to avoid runaway loops
-    pre_target_confidence_multiplier: float = 0.85  # Lower confidence threshold before target
+    pre_target_confidence_multiplier: float = 1.10  # Be stricter before target, not more aggressive
+    max_consecutive_losses: int = 2  # Pause new entries after repeated failed setups
     min_order_idr: float = 10_000.0  # Exchange minimum notional per order (Indodax)
     stop_loss_atr_multiplier: float = 2.0  # Increased from 1.5 to 2.0 to give trade more breathing room
     take_profit_rr_ratio: float = 2.0     # Risk:Reward = 1:2
@@ -122,12 +123,13 @@ class Config:
             daily_target_profit_pct=float(os.getenv("DAILY_TARGET_PROFIT", "0.01")),
             daily_target_profit_min_idr=float(os.getenv("DAILY_TARGET_PROFIT_MIN_IDR", "30000")),
             stop_new_entries_after_target=os.getenv("STOP_NEW_ENTRIES_AFTER_TARGET", "true").lower() == "true",
-            min_entry_confidence=float(os.getenv("MIN_ENTRY_CONFIDENCE", "0.62")),
-            first_trade_min_confidence=float(os.getenv("FIRST_TRADE_MIN_CONFIDENCE", "0.50")),
-            max_trades_per_day=int(os.getenv("MAX_TRADES_PER_DAY", "4")),
-            force_reentry_until_target=os.getenv("FORCE_REENTRY_UNTIL_TARGET", "true").lower() == "true",
+            min_entry_confidence=float(os.getenv("MIN_ENTRY_CONFIDENCE", "0.72")),
+            first_trade_min_confidence=float(os.getenv("FIRST_TRADE_MIN_CONFIDENCE", "0.68")),
+            max_trades_per_day=int(os.getenv("MAX_TRADES_PER_DAY", "3")),
+            force_reentry_until_target=os.getenv("FORCE_REENTRY_UNTIL_TARGET", "false").lower() == "true",
             max_trades_hard_cap=int(os.getenv("MAX_TRADES_HARD_CAP", "20")),
-            pre_target_confidence_multiplier=float(os.getenv("PRE_TARGET_CONFIDENCE_MULTIPLIER", "0.85")),
+            pre_target_confidence_multiplier=float(os.getenv("PRE_TARGET_CONFIDENCE_MULTIPLIER", "1.10")),
+            max_consecutive_losses=int(os.getenv("MAX_CONSECUTIVE_LOSSES", "2")),
             min_order_idr=float(os.getenv("MIN_ORDER_IDR", "10000")),
             stop_loss_atr_multiplier=float(os.getenv("STOP_LOSS_ATR_MULTIPLIER", "2.0")),
             take_profit_rr_ratio=float(os.getenv("TAKE_PROFIT_RR_RATIO", "2.0")),
@@ -195,6 +197,9 @@ class Config:
 
         if not (0.5 <= self.risk.pre_target_confidence_multiplier <= 1.5):
             issues.append("WARNING: PRE_TARGET_CONFIDENCE_MULTIPLIER should be in range 0.5..1.5")
+
+        if self.risk.max_consecutive_losses < 1:
+            issues.append("WARNING: MAX_CONSECUTIVE_LOSSES must be at least 1")
 
         if self.risk.min_order_idr < 1_000:
             issues.append("WARNING: MIN_ORDER_IDR terlalu rendah; cek minimum exchange")

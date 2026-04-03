@@ -59,10 +59,11 @@ Setiap sinyal teknikal dengan keyakinan >70% akan dikirim ke **Gemini 1.5 Flash*
 - **Callback**: Jika harga turun 1% dari titik tertinggi, bot langsung jual (_close position_).
 - **Hasil**: Mengubah target 2% menjadi potensi 10%, 20%, atau lebih selama tren masih naik.
 
-### C. Daily Hunter & Elite Mode
+### C. Daily Discipline & Elite Mode
 
-- **Hunter Mode (Target Force)**: Aktif jika target harian belum tercapai. Bot lebih agresif mencari sinyal dan melebarkan batas _Stop Loss_ hingga 25% untuk menahan fluktuasi _whipsaw_.
+- **Discipline Mode**: Aktif jika target harian belum tercapai. Bot tetap mengejar peluang, tetapi tidak menurunkan standar entry. Tidak ada _confidence boost_, tidak ada _re-entry_ agresif, dan sinyal tanpa konfirmasi multi-timeframe tetap dibatalkan.
 - **Elite Mode**: Aktif jika target harian tercapai. Bot menjadi sangat selektif (hanya mengambil sinyal A+) dan memotong eksposur modal sebesar 50% untuk menjaga profit yang sudah didapat.
+- **Loss Streak Cooldown**: Jika terjadi beberapa loss beruntun pada hari yang sama, bot menghentikan entry baru sementara untuk mencegah _revenge trading_.
 
 ### D. Drawdown Punishment (Risk Halving)
 

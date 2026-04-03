@@ -70,20 +70,20 @@ class TestSignalGenerator:
         assert "berlawanan" in signal.reason.lower() or "hati" in signal.reason.lower()
 
     def test_bullish_mild_distribution_can_buy_dip(self):
-        """Bullish trend + mild distribution can produce a cautious BUY."""
+        """Bullish trend + mild distribution should stay HOLD until distribution clears."""
         signal = self.gen.generate(
             _tech("BULLISH", "MODERATE", confidence=0.82),
             _volume("DISTRIBUTING", confidence=0.5, imbalance_score=-0.25),
         )
-        assert signal.action in ("BUY", "STRONG_BUY")
+        assert signal.action == "HOLD"
 
     def test_neutral_trend_accumulating_is_smart_money_buy(self):
-        """Neutral trend + volume accumulation → BUY (smart money leads)."""
+        """Neutral trend + volume accumulation should still be HOLD until trend confirms."""
         signal = self.gen.generate(
             _tech("NEUTRAL", "WEAK"),
             _volume("ACCUMULATING"),
         )
-        assert signal.action == "BUY"
+        assert signal.action == "HOLD"
 
     def test_neutral_trend_distributing_is_hold(self):
         """Neutral trend + distribution → HOLD (wait for clearer direction)."""
@@ -94,13 +94,12 @@ class TestSignalGenerator:
         assert signal.action == "HOLD"
 
     def test_neutral_trend_range_buy_on_high_volume(self):
-        """Neutral trend + NEUTRAL HIGH volume + good whale + tight imbalance → Range BUY."""
+        """Neutral trend + high activity should still be HOLD without directional edge."""
         signal = self.gen.generate(
             _tech("NEUTRAL", "WEAK", confidence=0.5),
             _volume("NEUTRAL", "HIGH", confidence=0.55, imbalance_score=-0.10, whale_score=5),
         )
-        assert signal.action == "BUY"
-        assert signal.confidence >= 0.48
+        assert signal.action == "HOLD"
 
     def test_no_data_is_hold(self):
         """No data at all → HOLD."""
@@ -135,7 +134,7 @@ class TestSignalGenerator:
         assert signal.action == "HOLD"
 
     def test_multi_tf_adaptive_fallback_allows_buy(self):
-        """Strong multi-TF bullish alignment with non-opposing volume can become BUY."""
+        """Bullish multi-TF without volume confirmation should stay HOLD."""
         tech_signals = {
             "1h": _tech("BULLISH", "MODERATE", confidence=0.82),
             "4h": TechnicalSignal(
@@ -159,11 +158,11 @@ class TestSignalGenerator:
         )
 
         signal = self.gen.generate_multi_timeframe(tech_signals, volume)
-        assert signal.action in ("BUY", "STRONG_BUY")
-        assert signal.timeframes_aligned >= 2
+        assert signal.action == "HOLD"
+        assert signal.timeframes_aligned == 0
 
     def test_multi_tf_bull_regime_allows_mild_distribution_buy(self):
-        """In strong bull regime, mild distribution should not block adaptive BUY."""
+        """In bull regime, mild distribution should still block BUY until flow improves."""
         tech_signals = {
             "1h": _tech("BULLISH", "MODERATE", confidence=0.8),
             "4h": TechnicalSignal(
@@ -187,4 +186,19 @@ class TestSignalGenerator:
         )
 
         signal = self.gen.generate_multi_timeframe(tech_signals, volume, market_regime="TRENDING_BULL")
-        assert signal.action in ("BUY", "STRONG_BUY")
+        assert signal.action == "HOLD"
+
+    def test_regular_buy_without_multi_tf_confirmation_becomes_hold(self):
+        """Single-timeframe BUY should be cancelled when MTF confirmation is missing."""
+        tech_signals = {
+            "1h": _tech("BULLISH", "STRONG", confidence=0.85),
+            "4h": _tech("NEUTRAL", "WEAK", confidence=0.45),
+        }
+
+        signal = self.gen.generate_multi_timeframe(
+            tech_signals,
+            _volume("ACCUMULATING", confidence=0.8, imbalance_score=0.5, whale_score=6),
+        )
+
+        assert signal.action == "HOLD"
+        assert "entry dibatalkan" in signal.reason.lower()

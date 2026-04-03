@@ -20,6 +20,8 @@ class TestRiskManager:
 
     def test_position_size_2_percent(self):
         """Position should risk exactly 2% of equity."""
+        self.config.risk.risk_per_trade = 0.02
+        self.risk_mgr = RiskManager(self.config, self.db)
         equity = 10_000_000  # 10M IDR
         entry = 1_500_000_000  # 1.5B IDR (BTC)
         atr = 15_000_000  # 15M IDR
@@ -266,9 +268,34 @@ class TestRiskManager:
             symbol="BTC/IDR",
             side="buy",
             entry_price=1_000,
-            atr=250,
+            atr=300,
             equity=110_000,
         )
 
         assert plan.approved is False
         assert "minimum order" in plan.rejection_reason.lower()
+
+    def test_consecutive_loss_limit_blocks_new_entry(self):
+        """New entries should pause after the configured number of consecutive losses."""
+        self.config.risk.max_consecutive_losses = 2
+        self.risk_mgr = RiskManager(self.config, self.db)
+
+        for entry_price, close_price in ((10_000_000, 9_000_000), (8_000_000, 7_000_000)):
+            trade_id = self.db.save_trade({
+                "symbol": "ETH/IDR",
+                "side": "buy",
+                "order_type": "market",
+                "price": entry_price,
+                "amount": 0.01,
+                "cost": entry_price * 0.01,
+                "status": "open",
+                "mode": "paper",
+            })
+            self.db.close_trade(trade_id, close_price, "STOP_LOSS")
+
+        plan = self.risk_mgr.calculate_order(
+            "BTC/IDR", "buy", 1_500_000_000, 15_000_000, 10_000_000
+        )
+
+        assert plan.approved is False
+        assert "loss beruntun" in plan.rejection_reason.lower()

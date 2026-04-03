@@ -27,6 +27,23 @@ class RiskManager:
 
     ABSOLUTE_RISK_CAP_PCT = 0.05  # Never exceed 5% implied risk when auto-adjusting
 
+    def _count_consecutive_losses(self, trades: List[Dict[str, Any]]) -> int:
+        """Count latest consecutive closed losing trades for the current day."""
+        closed_trades = [t for t in trades if t.get("pnl") is not None]
+        ordered = sorted(
+            closed_trades,
+            key=lambda trade: trade.get("closed_at") or trade.get("opened_at") or "",
+        )
+
+        consecutive_losses = 0
+        for trade in reversed(ordered):
+            if trade.get("pnl", 0) < 0:
+                consecutive_losses += 1
+            else:
+                break
+
+        return consecutive_losses
+
     def __init__(self, config: Config, db: IDatabase):
         self.config = config
         self.db = db
@@ -79,9 +96,9 @@ class RiskManager:
             active_tp_rr *= 1.2          # Need higher reward to justify the noise risk
             base_risk_pct *= 0.5         # Very small exposure
         elif market_regime in ("TRENDING_BULL", "TRENDING_BEAR"):
-            active_tp_rr *= 1.5          # Let profits run wider
-            active_sl_multiplier *= 1.2  # Slight wiggle room
-            base_risk_pct = min(self.risk_per_trade * 1.5, 0.05) # Bet larger on confirmed trends
+            active_tp_rr *= 1.25         # Let profits run wider without oversizing
+            active_sl_multiplier *= 1.1  # Slight wiggle room
+            base_risk_pct = min(self.risk_per_trade * 1.1, 0.03)
             
         # ──── Punishments & Forced Target ────
         today_trades = self.db.get_trades_today()
@@ -89,15 +106,23 @@ class RiskManager:
             t.get("pnl", 0) for t in today_trades
             if t.get("pnl") is not None and t.get("pnl") < 0
         )
+        consecutive_losses = self._count_consecutive_losses(today_trades)
         
         punishment_limit_idr = equity * self.config.risk.punishment_drawdown_pct
         if abs(realized_loss) >= punishment_limit_idr:
             logger.warning(f"⚠️ PUNISHMENT ACTIVE: Loss harian >= {self.config.risk.punishment_drawdown_pct*100}%. Buying power dipotong setengah.")
             base_risk_pct *= 0.5
 
+        if consecutive_losses > 0:
+            loss_penalty = max(0.4, 1 - (0.25 * consecutive_losses))
+            logger.warning(
+                f"⚠️ LOSS STREAK: {consecutive_losses} loss beruntun hari ini. "
+                f"Risk diperkecil ke {loss_penalty*100:.0f}% dari base risk."
+            )
+            base_risk_pct *= loss_penalty
+
         if not daily_target_met:
-            # Pemasaksaan Profit: Jika belum capai target, lebarkan SL 25% agar posisi tahan 'whipsaw' / tidak rentan tersentuh
-            active_sl_multiplier *= 1.25
+            active_tp_rr *= 1.1
         else:
             # Protect profits -> Elite Mode -> Half exposure
             base_risk_pct *= 0.5
@@ -268,6 +293,13 @@ class RiskManager:
                 f"Daily drawdown limit tercapai: "
                 f"{abs(realized_loss):,.0f} / {max_daily_loss:,.0f} IDR ({self.daily_drawdown*100:.0f}%) | "
                 f"Stop trading hari ini"
+            )
+
+        consecutive_losses = self._count_consecutive_losses(today_trades)
+        if consecutive_losses >= self.config.risk.max_consecutive_losses:
+            return (
+                f"Batas loss beruntun tercapai: {consecutive_losses}/"
+                f"{self.config.risk.max_consecutive_losses} | Pause entry untuk hindari revenge trading"
             )
 
         return None  # All checks passed

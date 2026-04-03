@@ -203,44 +203,12 @@ class SignalGenerator:
 
         # NEUTRAL tech trend — check volume for directional clues
         if tech and tech.trend == "NEUTRAL":
-            # NEUTRAL + ACCUMULATING → smart money leads, follow the whale
-            if volume.net_flow == "ACCUMULATING":
-                return TradingSignal(
-                    symbol=symbol,
-                    action="BUY",
-                    confidence=round(max(0.45, volume.confidence * 0.75), 2),
-                    reason=(
-                        f"🔵 SMART MONEY BUY: Teknis NEUTRAL tapi Volume AKUMULASI aktif "
-                        f"(Whale {volume.whale_score}/10, Imbalance {volume.imbalance_score:+.3f})"
-                    ),
-                    technical=tech,
-                    volume=volume,
-                )
-            # NEUTRAL + NEUTRAL volume + HIGH intensity + healthy whale + acceptable imbalance → Range BUY
-            if (
-                volume.net_flow == "NEUTRAL"
-                and volume.intensity == "HIGH"
-                and volume.whale_score >= 4
-                and volume.imbalance_score > -0.25
-            ):
-                return TradingSignal(
-                    symbol=symbol,
-                    action="BUY",
-                    confidence=round(max(0.48, volume.confidence * 0.80), 2),
-                    reason=(
-                        f"🔵 RANGE BUY: Trend NEUTRAL + High Volume Activity + Whale Aktif "
-                        f"(Whale {volume.whale_score}/10, Imbalance {volume.imbalance_score:+.3f})"
-                    ),
-                    technical=tech,
-                    volume=volume,
-                )
-            # Otherwise wait for clearer direction
             return TradingSignal(
                 symbol=symbol,
                 action="HOLD",
                 confidence=0.1,
                 reason=(
-                    f"📊 Trend NEUTRAL — Menunggu arah yang jelas | "
+                    f"📊 Trend NEUTRAL — Tidak ada edge yang cukup jelas untuk entry | "
                     f"Volume: {volume.net_flow} ({volume.intensity}) | "
                     f"Imbalance: {volume.imbalance_score:+.3f}"
                 ),
@@ -248,30 +216,15 @@ class SignalGenerator:
                 volume=volume,
             )
 
-        # BULLISH + DISTRIBUTING → usually conflicting.
-        # In mild distribution, allow a small buy-the-dip probe.
+        # BULLISH + DISTRIBUTING → conflicting, avoid catching a fading move.
         if tech and tech.trend == "BULLISH" and volume.net_flow == "DISTRIBUTING":
-            if volume.imbalance_score <= -0.45 or volume.confidence >= 0.75:
-                return TradingSignal(
-                    symbol=symbol,
-                    action="HOLD",
-                    confidence=0.2,
-                    reason=(
-                        f"⚠️ Sinyal berlawanan: Trend BULLISH tapi terjadi DISTRIBUSI kuat | "
-                        f"Smart money keluar — hati-hati!"
-                    ),
-                    technical=tech,
-                    volume=volume,
-                )
-
-            dip_confidence = round(max(0.25, min(0.65, tech.confidence * 0.65 + volume.confidence * 0.15)), 2)
             return TradingSignal(
                 symbol=symbol,
-                action="BUY",
-                confidence=dip_confidence,
+                action="HOLD",
+                confidence=0.2,
                 reason=(
-                    f"🟨 BUY THE DIP: Trend BULLISH dengan distribusi ringan | "
-                    f"Imbalance: {volume.imbalance_score:+.3f} | Entry bertahap dengan risiko ketat"
+                    f"⚠️ Sinyal berlawanan: Trend BULLISH tapi volume masih DISTRIBUSI | "
+                    f"Imbalance: {volume.imbalance_score:+.3f} | Menunggu akumulasi kembali"
                 ),
                 technical=tech,
                 volume=volume,
@@ -279,19 +232,6 @@ class SignalGenerator:
 
         # STRONG TREND + NEUTRAL VOLUME
         if tech and volume.net_flow == "NEUTRAL":
-            if tech.trend == "BULLISH" and tech.confidence >= 0.7 and volume.whale_score >= 3 and volume.imbalance_score > -0.25:
-                return TradingSignal(
-                    symbol=symbol,
-                    action="BUY",
-                    confidence=round(max(0.35, tech.confidence * 0.55), 2),
-                    reason=(
-                        f"🟡 EARLY BUY: Teknis {tech.trend} kuat meski volume NEUTRAL "
-                        f"(Whale {volume.whale_score}/10, Imbalance {volume.imbalance_score:+.3f})"
-                    ),
-                    technical=tech,
-                    volume=volume,
-                )
-
             if tech.trend in ("BULLISH", "BEARISH") and tech.confidence >= 0.4:
                 return TradingSignal(
                     symbol=symbol,
@@ -375,51 +315,6 @@ class SignalGenerator:
         primary_tf = list(signals.keys())[0]  # Usually "1h"
         primary = signals[primary_tf]
 
-        # Adaptive MTF fallback: allow entry when technical alignment is strong,
-        # while volume is not explicitly opposing the direction.
-        if buy_signals == 0 and sell_signals == 0:
-            bullish_volume_not_contra = (
-                volume_signal.net_flow != "DISTRIBUTING"
-                or (
-                    market_regime == "TRENDING_BULL"
-                    and volume_signal.imbalance_score > -0.35
-                    and volume_signal.confidence < 0.75
-                )
-            )
-
-            if (
-                bullish_tfs >= 2
-                and bullish_volume_not_contra
-                and volume_signal.whale_score >= 3
-                and volume_signal.imbalance_score > -0.45
-            ):
-                primary.action = "BUY"
-                primary.confidence = max(
-                    primary.confidence,
-                    round(min(0.95, avg_tech_conf * 0.65 + max(volume_signal.confidence, 0.35) * 0.35), 2),
-                )
-                primary.reason += (
-                    f" | ✅ ADAPTIVE MTF: {bullish_tfs}/{total} timeframe teknikal bullish "
-                    f"dengan volume tidak kontra kuat (whale {volume_signal.whale_score}/10)"
-                )
-                buy_signals = bullish_tfs
-            elif (
-                bearish_tfs >= 2
-                and volume_signal.net_flow != "ACCUMULATING"
-                and volume_signal.whale_score >= 3
-                and volume_signal.imbalance_score < 0.45
-            ):
-                primary.action = "SELL"
-                primary.confidence = max(
-                    primary.confidence,
-                    round(min(0.95, avg_tech_conf * 0.65 + max(volume_signal.confidence, 0.35) * 0.35), 2),
-                )
-                primary.reason += (
-                    f" | ✅ ADAPTIVE MTF: {bearish_tfs}/{total} timeframe teknikal bearish "
-                    f"dengan volume tidak kontra kuat (whale {volume_signal.whale_score}/10)"
-                )
-                sell_signals = bearish_tfs
-
         # Multi-TF confirmation
         if buy_signals >= 2:
             primary.timeframes_aligned = buy_signals
@@ -432,38 +327,18 @@ class SignalGenerator:
             primary.reason += f" | ✅ MTF: {sell_signals}/{total} timeframes confirm SELL"
             primary.confidence = min(1.0, primary.confidence * 1.2)
         else:
-            # No multi-TF agreement
-            if primary.action in ("STRONG_BUY", "STRONG_SELL"):
-                # Pass through strong signals but with reduced confidence
-                primary.confidence *= 0.8
-                primary.action = "BUY" if primary.action == "STRONG_BUY" else "SELL"
-                primary.reason += f" | ⚠️ MTF: Tidak ada konfirmasi, di-downgrade menjadi regular"
-            elif primary.action in ("BUY", "SELL"):
-                # Pass through regular signals with reduced confidence, without becoming HOLD
-                primary.confidence *= 0.6
-                primary.reason += f" | ⚠️ MTF: Tidak ada konfirmasi multi-timeframe"
-            else:
-                # Ensure HOLD remains HOLD
-                primary.action = "HOLD"
-                primary.confidence *= 0.5
-                primary.reason += f" | ⚠️ MTF: Tidak ada konfirmasi multi-timeframe"
+            primary.action = "HOLD"
+            primary.confidence *= 0.4
+            primary.reason += f" | ⚠️ MTF: Tidak ada konfirmasi multi-timeframe, entry dibatalkan"
             
             primary.timeframes_aligned = max(buy_signals, sell_signals)
             primary.total_timeframes = total
 
         # Apply Target Profit (Minimum Profit Mode) logic
         if not daily_target_met:
-            # Not yet met daily target -> AGGRESSIVE HUNTER MODE
-            # Boost confidence slightly to trigger more trades when whale flow is at least moderate.
-            if volume_signal and volume_signal.whale_score >= 4:
-                primary.confidence = min(1.0, primary.confidence * 1.5)
-                primary.reason += " | 🎯 HUNTER MODE: Mengejar target harian (Whale Verified)"
-            else:
-                primary.reason += " | 🎯 HUNTER MODE: Aktif, tapi dibatalkan karena Whale Score lemah"
-
+            primary.confidence *= 0.95
+            primary.reason += " | 🎯 DISCIPLINE MODE: Belum target harian, tanpa boost entry agresif"
         else:
-            # Target met -> RELAXED / ELITE MODE
-            # Penalize confidence so only A+ setups generate trades
             primary.confidence *= 0.6
             primary.reason += " | 🛡️ ELITE MODE: Target harian tercapai, sangat selektif"
 

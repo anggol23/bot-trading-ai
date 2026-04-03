@@ -513,18 +513,11 @@ class TradingAgent:
             return
 
         if trades_count_today >= self.config.risk.max_trades_per_day:
-            if daily_target_met or not self.config.risk.force_reentry_until_target:
-                logger.info(
-                    f"🧯 {symbol}: HOLD — Daily trade cap reached "
-                    f"({trades_count_today}/{self.config.risk.max_trades_per_day})"
-                )
-                return
-
             logger.info(
-                f"🔥 {symbol}: Aggressive re-entry enabled before daily target "
-                f"({trades_count_today}/{self.config.risk.max_trades_per_day}, "
-                f"hard cap {self.config.risk.max_trades_hard_cap})"
+                f"🧯 {symbol}: HOLD — Daily trade cap reached "
+                f"({trades_count_today}/{self.config.risk.max_trades_per_day})"
             )
+            return
 
         min_confidence = (
             self.config.risk.first_trade_min_confidence
@@ -533,7 +526,26 @@ class TradingAgent:
         )
 
         if not daily_target_met:
-            min_confidence *= self.config.risk.pre_target_confidence_multiplier
+            min_confidence *= max(1.0, self.config.risk.pre_target_confidence_multiplier)
+
+        closed_trades_today = [trade for trade in today_trades if trade.get("pnl") is not None]
+        closed_trades_today.sort(
+            key=lambda trade: trade.get("closed_at") or trade.get("opened_at") or ""
+        )
+
+        consecutive_losses = 0
+        for trade in reversed(closed_trades_today):
+            if trade.get("pnl", 0) < 0:
+                consecutive_losses += 1
+            else:
+                break
+
+        if consecutive_losses >= self.config.risk.max_consecutive_losses:
+            logger.info(
+                f"🧊 {symbol}: HOLD — Consecutive loss cooldown active "
+                f"({consecutive_losses}/{self.config.risk.max_consecutive_losses})"
+            )
+            return
 
         if signal.confidence < min_confidence:
             logger.info(
