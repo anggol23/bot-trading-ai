@@ -10,9 +10,10 @@
 4.  **Trade Management (Pyramiding & Exhaustion)**:
     - **Scale-In**: AI dapat membuka posisi hingga 3 lapis untuk aset yang sedang _profit_ (dengan resiko yang dibagi dua setiap masuk lapis baru).
     - **Volume Exhaustion Trailing**: Mampu menahan aset tanpa batas Take-Profit statis, lalu **Force Close** seketika saat terdeteksi _Whales_ mulai melakukan distribusi (jual massal).
-5.  **Dynamic Risk Punishment & Target Force**: AI bertindak adaptif terhadap performa hariannya:
-    - **Target Force**: Jika target profit harian (misal: 1%) belum tercapai, AI akan memberikan ruang _Stop Loss_ ekstra sebesar 25% agar posisi tidak mudah tersapu _whipsaw_ pasar yang bergejolak.
-    - **Drawdown Punishment**: Jika AI menyentuh batas kerugian harian (misal: rugi > 2%), alokasi modal otomatis dipotong separuh (50%) untuk melindungi ekuitas dari manuver balas dendam (_Revenge Trading_).
+5.  **Dynamic Risk Punishment & Entry Discipline**: AI bertindak adaptif terhadap performa hariannya:
+    - **Entry Discipline**: Jika target profit harian belum tercapai, AI tetap disiplin. Tidak ada _confidence boost_, tidak ada _re-entry_ agresif, dan sinyal tanpa konfirmasi multi-timeframe akan langsung dibatalkan.
+    - **Loss Streak Cooldown**: Jika terjadi beberapa _loss_ beruntun di hari yang sama, bot akan menghentikan entry baru sementara agar tidak masuk ke pola _revenge trading_.
+    - **Drawdown Punishment**: Jika AI menyentuh batas kerugian harian (misal: rugi > 2%), alokasi modal otomatis dipotong separuh (50%) untuk melindungi ekuitas.
 6.  **Macro Sentiment Veto (NLP)**: Mengambil berita kripto secara _real-time_ lewat API dan menganalisis polanya menggunakan `vaderSentiment`. Jika terpantau sentimen fundamental sangat buruk (krisis, hack), AI akan melakukan _Veto_ (HOLD) pada sinyal teknikal apapun untuk mencegah kerugian _black swan_.
 7.  **Interactive React Web Dashboard**: Menyajikan antarmuka visual _real-time_ atas kinerja bot. Fitur lengkap mulai dari _Equity Curve_ dengan filter rentang waktu (Hari Ini, 7 Hari, 30 Hari, Semua), Riwayat Transaksi tertutup, Live Volume Feed penemuan Paus, hingga pantauan target harian dan _Unrealized PNL_.
 
@@ -78,29 +79,31 @@ INDODAX_API_KEY="kunci_api_indodax_anda"
 INDODAX_SECRET="kunci_rahasia_indodax_anda"
 
 # ===== Trading & Risk Configuration =====
-TRADING_PAIRS="BTC/IDR,ETH/IDR,SOL/IDR,ADA/IDR,DOGE/IDR"
-TIMEFRAME="15m"                           # Timeframe indikator (15m, 1h, 4h, dll)
-ANALYSIS_INTERVAL_MINUTES=5               # Interval siklus pemindaian pasar
+TRADING_PAIRS="BTC/IDR,ETH/IDR,SOL/IDR"
+TIMEFRAME="1h"                            # Timeframe indikator utama
+ANALYSIS_INTERVAL_MINUTES=30              # Jangan scan terlalu sering untuk timeframe 1 jam
 
-RISK_PER_TRADE=0.02                       # Risiko per perdagangan (0.02 = 2% modal)
-MAX_OPEN_POSITIONS=3                      # Maksimal order paralel
-DAILY_DRAWDOWN_LIMIT=0.05                 # Batas kerugian mati harian (5%)
-PUNISHMENT_DRAWDOWN_PCT=0.02              # Batas kerugian hingga modal AI dipotong setengah
+RISK_PER_TRADE=0.01                       # Risiko per perdagangan (1% modal)
+MAX_OPEN_POSITIONS=2                      # Maksimal order paralel
+DAILY_DRAWDOWN_LIMIT=0.025                # Batas kerugian harian 2.5%
+PUNISHMENT_DRAWDOWN_PCT=0.01              # Risk dipangkas jika loss harian > 1%
 DAILY_TARGET_PROFIT=0.01                  # Target profit harian berbasis persen ekuitas
-DAILY_TARGET_PROFIT_MIN_IDR=30000         # Target profit harian minimum absolut (Rp)
+DAILY_TARGET_PROFIT_MIN_IDR=15000         # Target profit harian minimum absolut (Rp)
 STOP_NEW_ENTRIES_AFTER_TARGET=true        # Kunci profit: stop entry baru setelah target tercapai
-MIN_ENTRY_CONFIDENCE=0.62                 # Confidence minimum untuk entry normal (trade ke-2 dst)
-FIRST_TRADE_MIN_CONFIDENCE=0.50           # Confidence minimum khusus trade pertama harian
-MAX_TRADES_PER_DAY=4                      # Batas jumlah trade per hari untuk mencegah overtrading
+MIN_ENTRY_CONFIDENCE=0.78                 # Confidence minimum untuk entry normal
+FIRST_TRADE_MIN_CONFIDENCE=0.72           # Confidence minimum khusus trade pertama harian
+MAX_TRADES_PER_DAY=2                      # Batas jumlah trade per hari untuk mencegah overtrading
+MAX_CONSECUTIVE_LOSSES=2                  # Pause entry baru setelah loss beruntun
 STOP_LOSS_ATR_MULTIPLIER=2.0              # Jarak rentang Stop Loss dari volatilitas
+TAKE_PROFIT_RR_RATIO=2.3                  # Entry harus mengejar reward yang lebih layak
 
 # ===== Trailing Take Profit =====
 TRAILING_TP_ACTIVATION=0.015              # Trailing nyala jika profit tembus 1.5%
 TRAILING_TP_CALLBACK=0.01                 # Harga turun 1% = ambil profit
 
 # ===== Volume Tracker & NLP =====
-VOLUME_ANOMALY_MULTIPLIER=3.0             # Syarat paus: Volume 3x rata-rata
-VOLUME_ANOMALY_MIN_USD_VALUE=5000         # Filter minimal US$ 5000 per transaksi paus
+VOLUME_ANOMALY_MULTIPLIER=3.5             # Syarat paus: Volume 3.5x rata-rata
+VOLUME_ANOMALY_MIN_USD_VALUE=7000         # Filter minimal US$ 7000 per transaksi paus
 CRYPTOPANIC_API_KEY="kunci_cryptopanic"   # Akses API sentimen berita Fundamental
 
 # ===== AI LLM Strategist (Gemini) =====
@@ -145,7 +148,7 @@ export PYTHONPATH=$(pwd)
 pytest tests/
 ```
 
-Tunggu beberapa detik, jika muncul bar merah atau pesan `FAILED`, hubungi _developer_. Jika hijau / `PASSED`, sistem 100% stabil.
+Di Windows, jika logger UTF-8 aktif, jalankan `pytest -s tests/` agar _output capture_ tidak bentrok dengan wrapper stream.
 
 ---
 
