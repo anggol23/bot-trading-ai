@@ -95,6 +95,11 @@ class LogConfig:
     directory: str = "logs"
 
 
+@dataclass
+class SupabaseConfig:
+    db_url: str = ""
+
+
 class Config:
     """Central configuration loaded from environment variables."""
 
@@ -170,6 +175,10 @@ class Config:
             gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
             model_name=os.getenv("GEMINI_MODEL", "gemini-1.5-flash"),
             enable_llm_audit=os.getenv("ENABLE_LLM_AUDIT", "true").lower() == "true",
+        )
+
+        self.supabase = SupabaseConfig(
+            db_url=os.getenv("SUPABASE_DB_URL", ""),
         )
 
     def validate(self) -> List[str]:

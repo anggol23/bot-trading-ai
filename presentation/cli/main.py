@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from config.settings import Config
-from infrastructure.storage.sqlite_repository import SqliteRepository as Database
+from infrastructure.storage.supabase_repository import SupabaseRepository as Database
 from infrastructure.exchange.indodax_client import MarketDataFetcher
 from infrastructure.exchange.ccxt_executor import OrderExecutor
 from use_cases.analysis.volume_tracker import VolumeTracker
@@ -57,7 +57,7 @@ class TradingAgent:
         self.running = False
 
         # Initialize all components
-        self.db = Database()
+        self.db = Database(config.supabase.db_url)
         self.market_data = MarketDataFetcher(config)
         self.volume_tracker = VolumeTracker(config, self.market_data, self.db)
         self.tech_analyzer = TechnicalAnalyzer()
