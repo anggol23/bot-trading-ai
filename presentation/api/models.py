@@ -78,3 +78,26 @@ class DailyTargetResponse(BaseModel):
     daily_drawdown_pct: float
     drawdown_limit_pct: float
     equity: float
+
+class UserRegisterRequest(BaseModel):
+    email: str
+    password: str
+
+class UserLoginRequest(BaseModel):
+    email: str
+    password: str
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    email: str
+    user_id: int
+
+class UserKeysRequest(BaseModel):
+    api_key: str
+    api_secret: str
+
+class UserKeysResponse(BaseModel):
+    api_key: Optional[str] = None
+    api_secret: Optional[str] = None
+

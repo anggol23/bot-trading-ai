@@ -2,7 +2,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 import os
 from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from presentation.api.models import (
     PortfolioSummaryResponse, PositionResponse, SignalResponse,
     VolumeAnomalyResponse, ChartDataPoint, CandleResponse,
@@ -18,7 +18,66 @@ def get_db_connection():
     conn = psycopg2.connect(DB_URL)
     return conn
 
-def get_portfolio_summary() -> PortfolioSummaryResponse:
+# ──────────────────────────────── Auth Helpers ────────────────────────────────
+
+def create_user(email: str, password_hash: str) -> int:
+    conn = get_db_connection()
+    c = conn.cursor()
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        c.execute("""
+            INSERT INTO users (email, password_hash, created_at)
+            VALUES (%s, %s, %s)
+            RETURNING id
+        """, (email, password_hash, now))
+        user_id = c.fetchone()[0]
+        conn.commit()
+        return user_id
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        conn.close()
+
+def get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
+    conn = get_db_connection()
+    c = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        c.execute("SELECT * FROM users WHERE email = %s", (email,))
+        row = c.fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+def update_user_keys(user_id: int, api_key: str, api_secret: str):
+    conn = get_db_connection()
+    c = conn.cursor()
+    try:
+        c.execute("""
+            UPDATE users 
+            SET api_key = %s, api_secret = %s 
+            WHERE id = %s
+        """, (api_key, api_secret, user_id))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        conn.close()
+
+def get_user_keys(user_id: int) -> Optional[Dict[str, Any]]:
+    conn = get_db_connection()
+    c = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        c.execute("SELECT api_key, api_secret FROM users WHERE id = %s", (user_id,))
+        row = c.fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+# ─────────────────────────── Multi-User Data Helpers ───────────────────────────
+
+def get_portfolio_summary(user_id: int) -> PortfolioSummaryResponse:
     if not DB_URL or "project-id" in DB_URL:
         return PortfolioSummaryResponse(
             total_equity=300000.0, available_balance=300000.0, unrealized_pnl=0.0,
@@ -29,22 +88,22 @@ def get_portfolio_summary() -> PortfolioSummaryResponse:
         conn = get_db_connection()
         c = conn.cursor(cursor_factory=RealDictCursor)
         
-        # 1. Realized PnL Today (PostgreSQL-compatible substring date check)
+        # 1. Realized PnL Today (Filtered by user_id)
         c.execute("""
             SELECT SUM(pnl) as today_pnl 
             FROM trades 
-            WHERE status = 'closed' 
+            WHERE status = 'closed' AND user_id = %s
             AND SUBSTRING(closed_at, 1, 10) = TO_CHAR(CURRENT_DATE, 'YYYY-MM-DD')
-        """)
+        """, (user_id,))
         row = c.fetchone()
         realized_pnl = float(row['today_pnl']) if row and row['today_pnl'] else 0.0
         
-        # 2. Open Positions
-        c.execute("SELECT * FROM trades WHERE status = 'open'")
+        # 2. Open Positions (Filtered by user_id)
+        c.execute("SELECT * FROM trades WHERE status = 'open' AND user_id = %s", (user_id,))
         open_positions = c.fetchall()
         
-        # 3. Snapshot
-        c.execute("SELECT * FROM portfolio_snapshots ORDER BY snapshot_at DESC LIMIT 1")
+        # 3. Snapshot (Filtered by user_id)
+        c.execute("SELECT * FROM portfolio_snapshots WHERE user_id = %s ORDER BY snapshot_at DESC LIMIT 1", (user_id,))
         snap = c.fetchone()
         
         conn.close()
@@ -59,7 +118,7 @@ def get_portfolio_summary() -> PortfolioSummaryResponse:
                 daily_drawdown_pct=0.0
             )
     except Exception as e:
-        print(f"Error fetching portfolio summary from Supabase: {e}")
+        print(f"Error fetching portfolio summary from Supabase for user {user_id}: {e}")
         
     return PortfolioSummaryResponse(
         total_equity=300000.0,
@@ -70,13 +129,13 @@ def get_portfolio_summary() -> PortfolioSummaryResponse:
         daily_drawdown_pct=0.0
     )
 
-def get_active_positions() -> List[PositionResponse]:
+def get_active_positions(user_id: int) -> List[PositionResponse]:
     if not DB_URL or "project-id" in DB_URL:
         return []
     try:
         conn = get_db_connection()
         c = conn.cursor(cursor_factory=RealDictCursor)
-        c.execute("SELECT * FROM trades WHERE status = 'open' ORDER BY opened_at DESC")
+        c.execute("SELECT * FROM trades WHERE status = 'open' AND user_id = %s ORDER BY opened_at DESC", (user_id,))
         rows = c.fetchall()
         conn.close()
         
@@ -101,10 +160,11 @@ def get_active_positions() -> List[PositionResponse]:
             ))
         return positions
     except Exception as e:
-        print(f"Error fetching active positions: {e}")
+        print(f"Error fetching active positions for user {user_id}: {e}")
         return []
 
 def get_recent_signals(limit: int = 10) -> List[SignalResponse]:
+    """Signals represent public market scan events, no user_id filtering needed."""
     if not DB_URL or "project-id" in DB_URL:
         return []
     try:
@@ -129,6 +189,7 @@ def get_recent_signals(limit: int = 10) -> List[SignalResponse]:
         return []
 
 def get_volume_anomalies(limit: int = 10) -> List[VolumeAnomalyResponse]:
+    """Volume anomalies are public market events."""
     if not DB_URL or "project-id" in DB_URL:
         return []
     try:
@@ -156,19 +217,19 @@ def get_volume_anomalies(limit: int = 10) -> List[VolumeAnomalyResponse]:
         print(f"Error fetching anomalies: {e}")
         return []
 
-def get_equity_curve(days: int = None) -> List[ChartDataPoint]:
+def get_equity_curve(user_id: int, days: int = None) -> List[ChartDataPoint]:
     if not DB_URL or "project-id" in DB_URL:
         return []
     try:
         conn = get_db_connection()
         c = conn.cursor(cursor_factory=RealDictCursor)
         
-        query = "SELECT snapshot_at, total_equity FROM portfolio_snapshots"
-        params = []
+        query = "SELECT snapshot_at, total_equity FROM portfolio_snapshots WHERE user_id = %s"
+        params = [user_id]
         
         if days is not None:
             cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-            query += " WHERE snapshot_at >= %s"
+            query += " AND snapshot_at >= %s"
             params.append(cutoff.isoformat())
             
         query += " ORDER BY snapshot_at ASC"
@@ -182,10 +243,11 @@ def get_equity_curve(days: int = None) -> List[ChartDataPoint]:
             value=r['total_equity']
         ) for r in rows]
     except Exception as e:
-        print(f"Error fetching equity curve: {e}")
+        print(f"Error fetching equity curve for user {user_id}: {e}")
         return []
 
 def get_latest_candles(symbol: str, timeframe: str = "1h", limit: int = 100) -> List[CandleResponse]:
+    """Candles represent public market data."""
     if not DB_URL or "project-id" in DB_URL:
         return []
     try:
@@ -223,7 +285,7 @@ def get_latest_candles(symbol: str, timeframe: str = "1h", limit: int = 100) -> 
         print(f"Error fetching candles: {e}")
         return []
 
-def get_trade_history(limit: int = 50) -> List[TradeHistoryResponse]:
+def get_trade_history(user_id: int, limit: int = 50) -> List[TradeHistoryResponse]:
     if not DB_URL or "project-id" in DB_URL:
         return []
     try:
@@ -235,9 +297,10 @@ def get_trade_history(limit: int = 50) -> List[TradeHistoryResponse]:
                    status, mode, close_reason,
                    opened_at, closed_at, close_price
             FROM trades
+            WHERE user_id = %s
             ORDER BY opened_at DESC
             LIMIT %s
-        """, (limit,))
+        """, (user_id, limit))
         rows = c.fetchall()
         conn.close()
 
@@ -271,10 +334,10 @@ def get_trade_history(limit: int = 50) -> List[TradeHistoryResponse]:
             ))
         return result
     except Exception as e:
-        print(f"Error fetching trade history: {e}")
+        print(f"Error fetching trade history for user {user_id}: {e}")
         return []
 
-def get_daily_target_status() -> DailyTargetResponse:
+def get_daily_target_status(user_id: int) -> DailyTargetResponse:
     from config.settings import Config
     config = Config()
 
@@ -292,9 +355,9 @@ def get_daily_target_status() -> DailyTargetResponse:
         c.execute("""
             SELECT SUM(pnl) as today_pnl
             FROM trades
-            WHERE status = 'closed'
+            WHERE status = 'closed' AND user_id = %s
             AND SUBSTRING(closed_at, 1, 10) = TO_CHAR(CURRENT_DATE, 'YYYY-MM-DD')
-        """)
+        """, (user_id,))
         row = c.fetchone()
         realized_pnl_today = float(row['today_pnl']) if row and row['today_pnl'] else 0.0
 
@@ -302,15 +365,15 @@ def get_daily_target_status() -> DailyTargetResponse:
         c.execute("""
             SELECT SUM(pnl) as today_loss
             FROM trades
-            WHERE status = 'closed'
+            WHERE status = 'closed' AND user_id = %s
             AND SUBSTRING(closed_at, 1, 10) = TO_CHAR(CURRENT_DATE, 'YYYY-MM-DD')
             AND pnl < 0
-        """)
+        """, (user_id,))
         row2 = c.fetchone()
         realized_loss = abs(float(row2['today_loss']) if row2 and row2['today_loss'] else 0.0)
 
         # Latest equity from snapshot
-        c.execute("SELECT total_equity FROM portfolio_snapshots ORDER BY snapshot_at DESC LIMIT 1")
+        c.execute("SELECT total_equity FROM portfolio_snapshots WHERE user_id = %s ORDER BY snapshot_at DESC LIMIT 1", (user_id,))
         snap = c.fetchone()
         conn.close()
 
@@ -348,7 +411,7 @@ def get_daily_target_status() -> DailyTargetResponse:
             equity=round(equity, 2),
         )
     except Exception as e:
-        print(f"Error fetching daily target status: {e}")
+        print(f"Error fetching daily target status for user {user_id}: {e}")
         return DailyTargetResponse(
             target_pct=1.0, target_idr=0.0, realized_pnl_today=0.0, progress_pct=0.0,
             status="NO_TRADES", daily_drawdown_pct=0.0, drawdown_limit_pct=2.5, equity=300000.0

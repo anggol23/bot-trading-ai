@@ -14,6 +14,7 @@ import {
   CheckCircle2,
   XCircle,
   Clock,
+  Settings,
 } from 'lucide-react';
 import ReactApexChart from 'react-apexcharts';
 
@@ -90,9 +91,12 @@ interface DailyTarget {
   equity: number;
 }
 
-type Tab = 'overview' | 'history';
+type Tab = 'overview' | 'history' | 'settings';
 
 function App() {
+  const [token, setToken] = useState<string | null>(localStorage.getItem('token'));
+  const [email, setEmail] = useState<string | null>(localStorage.getItem('email'));
+  
   const [portfolio, setPortfolio] = useState<PortfolioSummary | null>(null);
   const [positions, setPositions] = useState<Position[]>([]);
   const [anomalies, setAnomalies] = useState<VolumeAnomaly[]>([]);
@@ -102,10 +106,79 @@ function App() {
   const [dailyTarget, setDailyTarget] = useState<DailyTarget | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [chartFilter, setChartFilter] = useState<'1' | '7' | '30' | 'all'>('1');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!!localStorage.getItem('token'));
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
 
+  // Auth Form State
+  const [showRegister, setShowRegister] = useState(false);
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authConfirmPassword, setAuthConfirmPassword] = useState('');
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [authSuccess, setAuthSuccess] = useState<string | null>(null);
+  const [authLoading, setAuthLoading] = useState(false);
+
+  // Settings State (API Keys)
+  const [apiKey, setApiKey] = useState('');
+  const [apiSecret, setApiSecret] = useState('');
+  const [keysLoading, setKeysLoading] = useState(false);
+  const [keysMessage, setKeysMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
+  const [savedKeys, setSavedKeys] = useState<{ api_key: string | null; api_secret: string | null } | null>(null);
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('email');
+    localStorage.removeItem('userId');
+    setToken(null);
+    setEmail(null);
+    setPortfolio(null);
+    setPositions([]);
+  };
+
+  // Configure axios authorization header
   useEffect(() => {
+    if (token) {
+      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+    } else {
+      delete axios.defaults.headers.common['Authorization'];
+    }
+  }, [token]);
+
+  // Handle 401 errors
+  useEffect(() => {
+    const interceptor = axios.interceptors.response.use(
+      (response) => response,
+      (error) => {
+        if (error.response && error.response.status === 401) {
+          handleLogout();
+        }
+        return Promise.reject(error);
+      }
+    );
+    return () => {
+      axios.interceptors.response.eject(interceptor);
+    };
+  }, []);
+
+  const fetchKeysStatus = async () => {
+    if (!token) return;
+    try {
+      const res = await axios.get(`${API_BASE}/auth/keys`);
+      setSavedKeys(res.data);
+    } catch (err) {
+      console.error('Gagal mengambil status API Keys', err);
+    }
+  };
+
+  useEffect(() => {
+    if (token && activeTab === 'settings') {
+      fetchKeysStatus();
+    }
+  }, [token, activeTab]);
+
+  useEffect(() => {
+    if (!token) return;
+
     const fetchData = async () => {
       try {
         const equityUrl = chartFilter === 'all' ? `${API_BASE}/equity` : `${API_BASE}/equity?days=${chartFilter}`;
@@ -138,7 +211,69 @@ function App() {
     fetchData();
     const interval = setInterval(fetchData, 10000);
     return () => clearInterval(interval);
-  }, [chartFilter]);
+  }, [chartFilter, token]);
+
+  const handleAuthSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError(null);
+    setAuthSuccess(null);
+    
+    if (showRegister && authPassword !== authConfirmPassword) {
+      setAuthError("Konfirmasi password tidak cocok.");
+      return;
+    }
+
+    setAuthLoading(true);
+    try {
+      const endpoint = showRegister ? `${API_BASE}/auth/register` : `${API_BASE}/auth/login`;
+      const response = await axios.post(endpoint, {
+        email: authEmail,
+        password: authPassword
+      });
+
+      const { access_token, email: userEmail, user_id } = response.data;
+      
+      localStorage.setItem('token', access_token);
+      localStorage.setItem('email', userEmail);
+      localStorage.setItem('userId', String(user_id));
+
+      setToken(access_token);
+      setEmail(userEmail);
+      setLoading(true);
+      setAuthSuccess(showRegister ? "Registrasi berhasil! Masuk..." : "Login berhasil!");
+      
+      setAuthEmail('');
+      setAuthPassword('');
+      setAuthConfirmPassword('');
+    } catch (err: any) {
+      const msg = err.response?.data?.detail || "Email atau password salah.";
+      setAuthError(msg);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleKeysSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setKeysMessage(null);
+    setKeysLoading(true);
+
+    try {
+      await axios.post(`${API_BASE}/auth/keys`, {
+        api_key: apiKey,
+        api_secret: apiSecret
+      });
+      setKeysMessage({ type: 'success', text: 'API Keys Indodax berhasil diperbarui!' });
+      setApiKey('');
+      setApiSecret('');
+      fetchKeysStatus();
+    } catch (err: any) {
+      const msg = err.response?.data?.detail || "Gagal memperbarui API Keys.";
+      setKeysMessage({ type: 'error', text: msg });
+    } finally {
+      setKeysLoading(false);
+    }
+  };
 
   const formatIDR = (val: number) =>
     new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(val);
@@ -172,6 +307,117 @@ function App() {
     }
   };
 
+  if (!token) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-[#0b1120] px-4 font-sans relative overflow-hidden">
+        <div className="absolute top-[-20%] left-[-10%] w-[500px] h-[500px] rounded-full bg-blue-500/10 blur-[120px] pointer-events-none" />
+        <div className="absolute bottom-[-20%] right-[-10%] w-[500px] h-[500px] rounded-full bg-[#10b981]/10 blur-[120px] pointer-events-none" />
+
+        <div className="w-full max-w-md glass-card rounded-3xl p-8 relative z-10 border border-white/10 shadow-2xl">
+          <div className="flex flex-col items-center mb-8">
+            <div className="w-14 h-14 rounded-2xl bg-[#10b981]/20 flex items-center justify-center mb-4 border border-[#10b981]/30 shadow-lg shadow-[#10b981]/10">
+              <Activity className="w-8 h-8 text-[#10b981]" />
+            </div>
+            <h2 className="text-3xl font-extrabold text-white tracking-tight">AI Trading Node</h2>
+            <p className="text-gray-400 text-sm mt-1">Multi-user Autonomous Trading Agent</p>
+          </div>
+
+          <div className="flex gap-2 mb-6 p-1 bg-gray-800/40 border border-gray-700/30 rounded-xl">
+            <button
+              onClick={() => {
+                setShowRegister(false);
+                setAuthError(null);
+                setAuthSuccess(null);
+              }}
+              className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all duration-300 ${!showRegister ? 'bg-[#10b981] text-white shadow-lg shadow-[#10b981]/25' : 'text-gray-400 hover:text-gray-200'}`}
+            >
+              Sign In
+            </button>
+            <button
+              onClick={() => {
+                setShowRegister(true);
+                setAuthError(null);
+                setAuthSuccess(null);
+              }}
+              className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all duration-300 ${showRegister ? 'bg-[#10b981] text-white shadow-lg shadow-[#10b981]/25' : 'text-gray-400 hover:text-gray-200'}`}
+            >
+              Register
+            </button>
+          </div>
+
+          {authError && (
+            <div className="mb-4 flex items-center gap-2 bg-[#ef4444]/10 border border-[#ef4444]/20 text-[#ef4444] text-xs px-4 py-3 rounded-xl">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{authError}</span>
+            </div>
+          )}
+
+          {authSuccess && (
+            <div className="mb-4 flex items-center gap-2 bg-[#10b981]/10 border border-[#10b981]/20 text-[#10b981] text-xs px-4 py-3 rounded-xl">
+              <CheckCircle2 className="w-4 h-4 shrink-0" />
+              <span>{authSuccess}</span>
+            </div>
+          )}
+
+          <form onSubmit={handleAuthSubmit} className="space-y-4">
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5 ml-1">Email Address</label>
+              <input
+                type="email"
+                required
+                value={authEmail}
+                onChange={(e) => setAuthEmail(e.target.value)}
+                placeholder="name@company.com"
+                className="w-full bg-gray-900/60 border border-gray-800 focus:border-[#10b981] outline-none text-white text-sm px-4 py-3 rounded-xl transition-all duration-300 placeholder:text-gray-600 focus:shadow-md focus:shadow-[#10b981]/5"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5 ml-1">Password</label>
+              <input
+                type="password"
+                required
+                value={authPassword}
+                onChange={(e) => setAuthPassword(e.target.value)}
+                placeholder="••••••••"
+                className="w-full bg-gray-900/60 border border-gray-800 focus:border-[#10b981] outline-none text-white text-sm px-4 py-3 rounded-xl transition-all duration-300 placeholder:text-gray-600 focus:shadow-md focus:shadow-[#10b981]/5"
+              />
+            </div>
+
+            {showRegister && (
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5 ml-1">Confirm Password</label>
+                <input
+                  type="password"
+                  required
+                  value={authConfirmPassword}
+                  onChange={(e) => setAuthConfirmPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full bg-gray-900/60 border border-gray-800 focus:border-[#10b981] outline-none text-white text-sm px-4 py-3 rounded-xl transition-all duration-300 placeholder:text-gray-600 focus:shadow-md focus:shadow-[#10b981]/5"
+                />
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={authLoading}
+              className="w-full mt-2 py-3 bg-[#10b981] hover:bg-[#10b981]/80 text-white font-bold text-sm rounded-xl transition-all duration-300 shadow-lg shadow-[#10b981]/20 hover:shadow-[#10b981]/30 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {authLoading ? (
+                <>
+                  <Activity className="w-4 h-4 animate-spin" />
+                  {showRegister ? 'Creating Account...' : 'Signing In...'}
+                </>
+              ) : (
+                showRegister ? 'Register Account' : 'Sign In to Dashboard'
+              )}
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-[#0b1120]">
@@ -193,6 +439,12 @@ function App() {
           <AlertCircle className="w-12 h-12 text-[#ef4444]" />
           <h2 className="text-xl font-bold text-gray-200">Gagal Memuat Data Dashboard</h2>
           <p className="text-gray-500 text-sm">Cek koneksi ke server backend AI Trading.</p>
+          <button
+            onClick={handleLogout}
+            className="mt-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 text-white text-xs rounded-xl"
+          >
+            Logout & Login Ulang
+          </button>
         </div>
       </div>
     );
@@ -213,9 +465,21 @@ function App() {
           </div>
           <span className="ml-2 bg-[#10b981]/10 text-[#10b981] text-[10px] py-0.5 px-2 rounded-full border border-[#10b981]/20 font-medium">LIVE</span>
         </div>
-        <div className="text-right">
-          <p className="text-xs text-gray-500">Last Update</p>
-          <p className="font-mono text-sm text-gray-300">{lastUpdate.toLocaleTimeString()}</p>
+        <div className="flex items-center gap-6">
+          <div className="hidden sm:flex flex-col items-end">
+            <span className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold">User Akun</span>
+            <span className="text-xs text-gray-300 font-medium">{email}</span>
+          </div>
+          <button
+            onClick={handleLogout}
+            className="px-3.5 py-1.5 bg-gray-800 hover:bg-red-500/15 border border-gray-700 hover:border-red-500/30 text-gray-300 hover:text-red-400 text-xs rounded-xl font-semibold transition-all duration-300 cursor-pointer"
+          >
+            Logout
+          </button>
+          <div className="text-right border-l border-gray-800/60 pl-6">
+            <p className="text-xs text-gray-500">Last Update</p>
+            <p className="font-mono text-sm text-gray-300">{lastUpdate.toLocaleTimeString()}</p>
+          </div>
         </div>
       </header>
 
@@ -341,6 +605,15 @@ function App() {
                 {tradeHistory.length}
               </span>
             )}
+          </button>
+          <button
+            id="tab-settings"
+            onClick={() => setActiveTab('settings')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'settings' ? 'bg-[#10b981] text-white shadow-lg shadow-[#10b981]/20' : 'text-gray-400 hover:text-gray-200'
+              }`}
+          >
+            <Settings className="w-4 h-4" />
+            API Settings
           </button>
         </div>
 
@@ -673,6 +946,94 @@ function App() {
                 </strong></span>
               </div>
             )}
+          </div>
+        )}
+
+        {/* ════════════════════ SETTINGS TAB ════════════════════ */}
+        {activeTab === 'settings' && (
+          <div className="max-w-2xl mx-auto glass-card p-6 rounded-2xl animate-fade-in">
+            <div className="flex items-center gap-3 mb-6 pb-4 border-b border-gray-800/60">
+              <div className="w-10 h-10 rounded-xl bg-blue-500/15 flex items-center justify-center">
+                <Wallet className="w-5 h-5 text-blue-400" />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-white">Indodax API Keys Settings</h2>
+                <p className="text-gray-400 text-xs mt-0.5">Simpan API Key & API Secret Indodax Anda untuk live trading secara autonomous.</p>
+              </div>
+            </div>
+
+            {keysMessage && (
+              <div className={`mb-6 flex items-center gap-2 border text-xs px-4 py-3 rounded-xl ${
+                keysMessage.type === 'success' 
+                  ? 'bg-[#10b981]/10 border-[#10b981]/25 text-[#10b981]' 
+                  : 'bg-[#ef4444]/10 border-[#ef4444]/25 text-[#ef4444]'
+              }`}>
+                {keysMessage.type === 'success' ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertCircle className="w-4 h-4 shrink-0" />}
+                <span>{keysMessage.text}</span>
+              </div>
+            )}
+
+            {/* Current Config State Box */}
+            <div className="mb-6 p-4 bg-gray-900/40 border border-gray-800 rounded-xl space-y-3">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400">Status Kunci Saat Ini</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <span className="text-[10px] text-gray-500 block uppercase">Indodax API Key</span>
+                  <span className="font-mono text-sm text-gray-300">
+                    {savedKeys?.api_key ? savedKeys.api_key : <span className="text-yellow-500 text-xs italic">Belum dikonfigurasi</span>}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-gray-500 block uppercase">Indodax API Secret</span>
+                  <span className="font-mono text-sm text-gray-300">
+                    {savedKeys?.api_secret ? savedKeys.api_secret : <span className="text-yellow-500 text-xs italic">Belum dikonfigurasi</span>}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <form onSubmit={handleKeysSubmit} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5 ml-1">New Indodax API Key</label>
+                <input
+                  type="text"
+                  required
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder="Masukkan API Key baru..."
+                  className="w-full bg-gray-950/40 border border-gray-800 focus:border-[#10b981] outline-none text-white text-sm px-4 py-3 rounded-xl transition-all duration-300 placeholder:text-gray-600 focus:shadow-md focus:shadow-[#10b981]/5"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5 ml-1">New Indodax API Secret</label>
+                <input
+                  type="password"
+                  required
+                  value={apiSecret}
+                  onChange={(e) => setApiSecret(e.target.value)}
+                  placeholder="Masukkan API Secret baru..."
+                  className="w-full bg-gray-950/40 border border-gray-800 focus:border-[#10b981] outline-none text-white text-sm px-4 py-3 rounded-xl transition-all duration-300 placeholder:text-gray-600 focus:shadow-md focus:shadow-[#10b981]/5"
+                />
+              </div>
+
+              <div className="pt-2">
+                <button
+                  type="submit"
+                  disabled={keysLoading}
+                  className="w-full py-3 bg-[#10b981] hover:bg-[#10b981]/80 text-white font-bold text-sm rounded-xl transition-all duration-300 shadow-lg shadow-[#10b981]/25 hover:shadow-[#10b981]/30 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  {keysLoading ? (
+                    <>
+                      <Activity className="w-4 h-4 animate-spin" />
+                      Saving Keys...
+                    </>
+                  ) : (
+                    'Simpan API Keys'
+                  )}
+                </button>
+              </div>
+            </form>
           </div>
         )}
 
