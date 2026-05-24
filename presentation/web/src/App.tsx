@@ -57,6 +57,8 @@ interface Signal {
   confidence: number;
   reason: string;
   timestamp: string;
+  ai_decision?: string;
+  ai_reasoning?: string;
 }
 
 interface TradeHistory {
@@ -94,7 +96,7 @@ function App() {
   const [portfolio, setPortfolio] = useState<PortfolioSummary | null>(null);
   const [positions, setPositions] = useState<Position[]>([]);
   const [anomalies, setAnomalies] = useState<VolumeAnomaly[]>([]);
-  const [_, setSignals] = useState<Signal[]>([]);
+  const [signals, setSignals] = useState<Signal[]>([]);
   const [equityData, setEquityData] = useState<any[]>([]);
   const [tradeHistory, setTradeHistory] = useState<TradeHistory[]>([]);
   const [dailyTarget, setDailyTarget] = useState<DailyTarget | null>(null);
@@ -429,57 +431,128 @@ function App() {
               </div>
             </div>
 
-            {/* Active Positions */}
-            <div className="glass-card p-5 rounded-2xl">
-              <div className="flex items-center gap-2 mb-5">
-                <ListIcon className="w-4 h-4 text-gray-400" />
-                <h2 className="text-base font-bold text-white">Active Positions</h2>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-700 text-gray-400">{positions.length} open</span>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse text-sm">
-                  <thead>
-                    <tr className="border-b border-gray-700/40 text-[10px] uppercase tracking-wider text-gray-500">
-                      <th className="pb-3 px-3">Symbol</th>
-                      <th className="pb-3 px-3">Side</th>
-                      <th className="pb-3 px-3 text-right">Entry</th>
-                      <th className="pb-3 px-3 text-right">Current</th>
-                      <th className="pb-3 px-3 text-right">P&L</th>
-                      <th className="pb-3 px-3 text-right">Stop Loss</th>
-                      <th className="pb-3 px-3 text-right">Take Profit</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {positions.length === 0 && (
-                      <tr>
-                        <td colSpan={7} className="text-center py-8 text-gray-500 text-sm">
-                          Tidak ada posisi aktif
-                        </td>
+            {/* Active Positions Grid */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              
+              {/* Active Positions */}
+              <div className="lg:col-span-2 glass-card p-5 rounded-2xl">
+                <div className="flex items-center gap-2 mb-5">
+                  <ListIcon className="w-4 h-4 text-gray-400" />
+                  <h2 className="text-base font-bold text-white">Active Positions</h2>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-700 text-gray-400">{positions.length} open</span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-700/40 text-[10px] uppercase tracking-wider text-gray-500">
+                        <th className="pb-3 px-3">Symbol</th>
+                        <th className="pb-3 px-3">Side</th>
+                        <th className="pb-3 px-3 text-right">Entry</th>
+                        <th className="pb-3 px-3 text-right">Current</th>
+                        <th className="pb-3 px-3 text-right">P&L</th>
+                        <th className="pb-3 px-3 text-right">Stop Loss</th>
+                        <th className="pb-3 px-3 text-right">Take Profit</th>
                       </tr>
-                    )}
-                    {positions.map(pos => (
-                      <tr key={pos.id} className="border-b border-gray-800/30 hover:bg-white/[0.02] transition-colors">
-                        <td className="py-3 px-3 font-bold text-white">{pos.symbol}</td>
-                        <td className="py-3 px-3">
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${pos.side === 'buy' ? 'bg-[#10b981]/15 text-[#10b981]' : 'bg-[#ef4444]/15 text-[#ef4444]'}`}>
-                            {pos.side.toUpperCase()}
-                          </span>
-                        </td>
-                        <td className="py-3 px-3 text-right font-mono text-gray-300">{pos.entry_price.toLocaleString('id-ID')}</td>
-                        <td className="py-3 px-3 text-right font-mono text-gray-300">{pos.current_price.toLocaleString('id-ID')}</td>
-                        <td className={`py-3 px-3 text-right font-bold ${pos.unrealized_pnl >= 0 ? 'text-[#10b981]' : 'text-[#ef4444]'}`}>
-                          {pos.unrealized_pnl >= 0 ? '+' : ''}{pos.unrealized_pnl.toLocaleString('id-ID')}
-                          <span className="block text-[10px] font-normal mt-0.5 opacity-70">
-                            {pos.unrealized_pnl_pct >= 0 ? '+' : ''}{pos.unrealized_pnl_pct.toFixed(2)}%
-                          </span>
-                        </td>
-                        <td className="py-3 px-3 text-right text-orange-400/70 font-mono text-xs">{pos.stop_loss.toLocaleString('id-ID')}</td>
-                        <td className="py-3 px-3 text-right text-blue-400/70 font-mono text-xs">{pos.take_profit.toLocaleString('id-ID')}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {positions.length === 0 && (
+                        <tr>
+                          <td colSpan={7} className="text-center py-8 text-gray-500 text-sm">
+                            Tidak ada posisi aktif
+                          </td>
+                        </tr>
+                      )}
+                      {positions.map(pos => (
+                        <tr key={pos.id} className="border-b border-gray-800/30 hover:bg-white/[0.02] transition-colors">
+                          <td className="py-3 px-3 font-bold text-white">{pos.symbol}</td>
+                          <td className="py-3 px-3">
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${pos.side === 'buy' ? 'bg-[#10b981]/15 text-[#10b981]' : 'bg-[#ef4444]/15 text-[#ef4444]'}`}>
+                              {pos.side.toUpperCase()}
+                            </span>
+                          </td>
+                          <td className="py-3 px-3 text-right font-mono text-gray-300">{pos.entry_price.toLocaleString('id-ID')}</td>
+                          <td className="py-3 px-3 text-right font-mono text-gray-300">{pos.current_price.toLocaleString('id-ID')}</td>
+                          <td className={`py-3 px-3 text-right font-bold ${pos.unrealized_pnl >= 0 ? 'text-[#10b981]' : 'text-[#ef4444]'}`}>
+                            {pos.unrealized_pnl >= 0 ? '+' : ''}{pos.unrealized_pnl.toLocaleString('id-ID')}
+                            <span className="block text-[10px] font-normal mt-0.5 opacity-70">
+                              {pos.unrealized_pnl_pct >= 0 ? '+' : ''}{pos.unrealized_pnl_pct.toFixed(2)}%
+                            </span>
+                          </td>
+                          <td className="py-3 px-3 text-right text-orange-400/70 font-mono text-xs">{pos.stop_loss.toLocaleString('id-ID')}</td>
+                          <td className="py-3 px-3 text-right text-blue-400/70 font-mono text-xs">{pos.take_profit.toLocaleString('id-ID')}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
+
+              {/* Recent Signals & AI Audits */}
+              <div className="glass-card p-5 rounded-2xl flex flex-col" style={{ maxHeight: '450px' }}>
+                <div className="flex items-center gap-2 mb-4 pb-3 border-b border-gray-800/60">
+                  <Target className="w-4 h-4 text-blue-400" />
+                  <h2 className="text-base font-bold text-white">AI Signals & Audits</h2>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-700 text-gray-400">{signals.length} total</span>
+                </div>
+                <div className="flex-1 overflow-y-auto space-y-3 pr-1" style={{ scrollbarWidth: 'thin' }}>
+                  {signals.length === 0 && (
+                    <p className="text-gray-500 text-sm text-center py-6">Tidak ada sinyal terdeteksi</p>
+                  )}
+                  {signals.map((sig) => {
+                    const isBuy = sig.action.includes('BUY');
+                    const isSell = sig.action.includes('SELL');
+                    const colorClass = isBuy 
+                      ? 'text-[#10b981] bg-[#10b981]/15 border-[#10b981]/30' 
+                      : isSell 
+                        ? 'text-[#ef4444] bg-[#ef4444]/15 border-[#ef4444]/30' 
+                        : 'text-gray-400 bg-gray-800/30 border-gray-700/30';
+                    const aiApproved = sig.ai_decision === 'APPROVED';
+                    const aiRejected = sig.ai_decision === 'REJECTED';
+                    
+                    return (
+                      <div key={sig.id} className="p-3 bg-gray-800/20 rounded-xl border border-gray-800/40 hover:border-gray-700/30 transition-colors">
+                        <div className="flex justify-between items-start mb-2">
+                          <div>
+                            <span className="font-bold text-white text-sm">{sig.symbol}</span>
+                            <span className="text-[10px] text-gray-500 block font-mono">{formatDate(sig.timestamp)}</span>
+                          </div>
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${colorClass}`}>
+                            {sig.action.replace('_', ' ')}
+                          </span>
+                        </div>
+                        
+                        <div className="text-xs text-gray-400 mb-2 leading-relaxed">
+                          {sig.reason}
+                        </div>
+                        
+                        {/* LLM Audit Section */}
+                        {sig.ai_decision && (
+                          <div className="mt-2 pt-2 border-t border-gray-800/40 flex flex-col gap-1 bg-black/20 p-2 rounded-lg">
+                            <div className="flex items-center justify-between text-[10px]">
+                              <span className="text-gray-500 uppercase tracking-wider font-semibold">AI Strategist Audit</span>
+                              <span className={`font-bold px-1.5 py-0.2 rounded text-[9px] ${
+                                aiApproved 
+                                  ? 'text-[#10b981] bg-[#10b981]/10 border border-[#10b981]/20' 
+                                  : aiRejected 
+                                    ? 'text-[#ef4444] bg-[#ef4444]/10 border border-[#ef4444]/20' 
+                                    : 'text-yellow-400 bg-yellow-400/10 border border-yellow-400/20'
+                              }`}>
+                                {sig.ai_decision}
+                              </span>
+                            </div>
+                            {sig.ai_reasoning && (
+                              <p className="text-[10px] text-gray-400 italic mt-0.5 leading-snug">
+                                "{sig.ai_reasoning}"
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
             </div>
           </>
         )}

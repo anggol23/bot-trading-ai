@@ -110,7 +110,9 @@ def get_recent_signals(limit: int = 10) -> List[SignalResponse]:
         action=r['combined_action'],
         confidence=r['combined_confidence'],
         reason=f"Tech: {r['technical_trend']} | Vol: {r['volume_flow']}",
-        timestamp=r['created_at']
+        timestamp=r['created_at'],
+        ai_decision=r['ai_decision'],
+        ai_reasoning=r['ai_reasoning']
     ) for r in rows]
 
 def get_volume_anomalies(limit: int = 10) -> List[VolumeAnomalyResponse]:

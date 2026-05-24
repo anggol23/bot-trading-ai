@@ -93,7 +93,7 @@ class RiskManager:
             base_risk_pct *= 0.8         # Reduce exposure
         elif market_regime == "CHOPPY":
             active_sl_multiplier *= 0.8  # Tighter Stop Loss
-            active_tp_rr *= 1.2          # Need higher reward to justify the noise risk
+            active_tp_rr *= 0.6          # Quicker Take Profit to lock in smaller gains in sideways markets
             base_risk_pct *= 0.5         # Very small exposure
         elif market_regime in ("TRENDING_BULL", "TRENDING_BEAR"):
             active_tp_rr *= 1.25         # Let profits run wider without oversizing

@@ -27,6 +27,8 @@ class SignalResponse(BaseModel):
     confidence: float
     reason: str
     timestamp: str
+    ai_decision: Optional[str] = None
+    ai_reasoning: Optional[str] = None
 
 class VolumeAnomalyResponse(BaseModel):
     id: int
