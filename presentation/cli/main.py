@@ -627,7 +627,7 @@ class TradingAgent:
             # Update signal_id in trade
             cursor = self.db.conn.cursor()
             cursor.execute(
-                "UPDATE trades SET signal_id = ? WHERE id = ?",
+                "UPDATE trades SET signal_id = %s WHERE id = %s",
                 (signal_id, trade["id"])
             )
             self.db.conn.commit()
