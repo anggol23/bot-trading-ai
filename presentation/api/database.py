@@ -88,22 +88,22 @@ def get_portfolio_summary(user_id: int) -> PortfolioSummaryResponse:
         conn = get_db_connection()
         c = conn.cursor(cursor_factory=RealDictCursor)
         
-        # 1. Realized PnL Today (Filtered by user_id)
+        # 1. Realized PnL Today (Filtered by user_id or NULL fallback)
         c.execute("""
             SELECT SUM(pnl) as today_pnl 
             FROM trades 
-            WHERE status = 'closed' AND user_id = %s
+            WHERE status = 'closed' AND (user_id = %s OR user_id IS NULL)
             AND SUBSTRING(closed_at, 1, 10) = TO_CHAR(CURRENT_DATE, 'YYYY-MM-DD')
         """, (user_id,))
         row = c.fetchone()
         realized_pnl = float(row['today_pnl']) if row and row['today_pnl'] else 0.0
         
-        # 2. Open Positions (Filtered by user_id)
-        c.execute("SELECT * FROM trades WHERE status = 'open' AND user_id = %s", (user_id,))
+        # 2. Open Positions (Filtered by user_id or NULL fallback)
+        c.execute("SELECT * FROM trades WHERE status = 'open' AND (user_id = %s OR user_id IS NULL)", (user_id,))
         open_positions = c.fetchall()
         
-        # 3. Snapshot (Filtered by user_id)
-        c.execute("SELECT * FROM portfolio_snapshots WHERE user_id = %s ORDER BY snapshot_at DESC LIMIT 1", (user_id,))
+        # 3. Snapshot (Filtered by user_id or NULL fallback)
+        c.execute("SELECT * FROM portfolio_snapshots WHERE (user_id = %s OR user_id IS NULL) ORDER BY snapshot_at DESC LIMIT 1", (user_id,))
         snap = c.fetchone()
         
         conn.close()
@@ -135,7 +135,7 @@ def get_active_positions(user_id: int) -> List[PositionResponse]:
     try:
         conn = get_db_connection()
         c = conn.cursor(cursor_factory=RealDictCursor)
-        c.execute("SELECT * FROM trades WHERE status = 'open' AND user_id = %s ORDER BY opened_at DESC", (user_id,))
+        c.execute("SELECT * FROM trades WHERE status = 'open' AND (user_id = %s OR user_id IS NULL) ORDER BY opened_at DESC", (user_id,))
         rows = c.fetchall()
         conn.close()
         
@@ -224,7 +224,7 @@ def get_equity_curve(user_id: int, days: int = None) -> List[ChartDataPoint]:
         conn = get_db_connection()
         c = conn.cursor(cursor_factory=RealDictCursor)
         
-        query = "SELECT snapshot_at, total_equity FROM portfolio_snapshots WHERE user_id = %s"
+        query = "SELECT snapshot_at, total_equity FROM portfolio_snapshots WHERE (user_id = %s OR user_id IS NULL)"
         params = [user_id]
         
         if days is not None:
@@ -297,7 +297,7 @@ def get_trade_history(user_id: int, limit: int = 50) -> List[TradeHistoryRespons
                    status, mode, close_reason,
                    opened_at, closed_at, close_price
             FROM trades
-            WHERE user_id = %s
+            WHERE user_id = %s OR user_id IS NULL
             ORDER BY opened_at DESC
             LIMIT %s
         """, (user_id, limit))
@@ -355,7 +355,7 @@ def get_daily_target_status(user_id: int) -> DailyTargetResponse:
         c.execute("""
             SELECT SUM(pnl) as today_pnl
             FROM trades
-            WHERE status = 'closed' AND user_id = %s
+            WHERE status = 'closed' AND (user_id = %s OR user_id IS NULL)
             AND SUBSTRING(closed_at, 1, 10) = TO_CHAR(CURRENT_DATE, 'YYYY-MM-DD')
         """, (user_id,))
         row = c.fetchone()
@@ -365,7 +365,7 @@ def get_daily_target_status(user_id: int) -> DailyTargetResponse:
         c.execute("""
             SELECT SUM(pnl) as today_loss
             FROM trades
-            WHERE status = 'closed' AND user_id = %s
+            WHERE status = 'closed' AND (user_id = %s OR user_id IS NULL)
             AND SUBSTRING(closed_at, 1, 10) = TO_CHAR(CURRENT_DATE, 'YYYY-MM-DD')
             AND pnl < 0
         """, (user_id,))
@@ -373,7 +373,7 @@ def get_daily_target_status(user_id: int) -> DailyTargetResponse:
         realized_loss = abs(float(row2['today_loss']) if row2 and row2['today_loss'] else 0.0)
 
         # Latest equity from snapshot
-        c.execute("SELECT total_equity FROM portfolio_snapshots WHERE user_id = %s ORDER BY snapshot_at DESC LIMIT 1", (user_id,))
+        c.execute("SELECT total_equity FROM portfolio_snapshots WHERE (user_id = %s OR user_id IS NULL) ORDER BY snapshot_at DESC LIMIT 1", (user_id,))
         snap = c.fetchone()
         conn.close()
 

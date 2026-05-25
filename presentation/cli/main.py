@@ -57,7 +57,7 @@ class TradingAgent:
         self.running = False
 
         # Initialize all components
-        self.db = Database(config.supabase.db_url)
+        self.db = Database(config.supabase.db_url, config.supabase.user_id)
         self.market_data = MarketDataFetcher(config)
         self.volume_tracker = VolumeTracker(config, self.market_data, self.db)
         self.tech_analyzer = TechnicalAnalyzer()

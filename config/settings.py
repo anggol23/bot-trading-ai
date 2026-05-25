@@ -98,6 +98,7 @@ class LogConfig:
 @dataclass
 class SupabaseConfig:
     db_url: str = ""
+    user_id: int = 1
 
 
 class Config:
@@ -179,6 +180,7 @@ class Config:
 
         self.supabase = SupabaseConfig(
             db_url=os.getenv("SUPABASE_DB_URL", ""),
+            user_id=int(os.getenv("SUPABASE_USER_ID", "1")) if os.getenv("SUPABASE_USER_ID") else 1,
         )
 
     def validate(self) -> List[str]:

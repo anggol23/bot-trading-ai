@@ -17,8 +17,9 @@ logger = get_logger(__name__)
 class SupabaseRepository(IDatabase):
     """Supabase PostgreSQL database implementing the IDatabase port."""
 
-    def __init__(self, db_url: str):
+    def __init__(self, db_url: str, user_id: int = 1):
         self.db_url = db_url
+        self.user_id = user_id
         self.conn = None
         self._connect()
         self._create_tables()
@@ -265,8 +266,8 @@ class SupabaseRepository(IDatabase):
                     INSERT INTO signals
                     (symbol, timeframe, signal_type, technical_trend, technical_momentum,
                      technical_confidence, volume_flow, volume_intensity, volume_confidence,
-                     combined_action, combined_confidence, ai_decision, ai_reasoning, created_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     combined_action, combined_confidence, ai_decision, ai_reasoning, created_at, user_id)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id
                 """, (
                     signal["symbol"], signal["timeframe"], signal.get("signal_type", "analysis"),
@@ -276,7 +277,7 @@ class SupabaseRepository(IDatabase):
                     float(signal.get("volume_confidence") or 0.0),
                     signal["combined_action"], float(signal["combined_confidence"]),
                     signal.get("ai_decision"), signal.get("ai_reasoning"),
-                    now
+                    now, self.user_id
                 ))
                 return cursor.fetchone()[0]
         except Exception as e:
@@ -310,8 +311,8 @@ class SupabaseRepository(IDatabase):
                 cursor.execute("""
                     INSERT INTO trades
                     (symbol, side, order_type, price, amount, cost,
-                     stop_loss, take_profit, highest_price, max_drawdown, status, mode, signal_id, reasoning, opened_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     stop_loss, take_profit, highest_price, max_drawdown, status, mode, signal_id, reasoning, opened_at, user_id)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id
                 """, (
                     trade["symbol"], trade["side"], trade["order_type"],
@@ -321,7 +322,7 @@ class SupabaseRepository(IDatabase):
                     float(trade["price"]), 0.0,
                     trade.get("status", "open"), trade.get("mode", "paper"),
                     trade.get("signal_id"), trade.get("reasoning", ""), 
-                    datetime.now(timezone.utc).isoformat()
+                    datetime.now(timezone.utc).isoformat(), self.user_id
                 ))
                 return cursor.fetchone()[0]
         except Exception as e:
@@ -412,12 +413,13 @@ class SupabaseRepository(IDatabase):
                 cursor.execute("""
                     INSERT INTO portfolio_snapshots
                     (total_equity, available_balance, unrealized_pnl,
-                     realized_pnl_today, open_positions, snapshot_at)
-                    VALUES (%s, %s, %s, %s, %s, %s)
+                     realized_pnl_today, open_positions, snapshot_at, user_id)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
                 """, (
                     float(snapshot["total_equity"]), float(snapshot["available_balance"]),
                     float(snapshot["unrealized_pnl"]), float(snapshot["realized_pnl_today"]),
-                    int(snapshot["open_positions"]), datetime.now(timezone.utc).isoformat()
+                    int(snapshot["open_positions"]), datetime.now(timezone.utc).isoformat(),
+                    self.user_id
                 ))
         except Exception as e:
             logger.error(f"❌ Supabase save_portfolio_snapshot error: {e}")
